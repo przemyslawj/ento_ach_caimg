@@ -1,0 +1,743 @@
+---
+title: "Ach network effect analysis"
+output: html_notebook
+---
+```{r}
+library(dplyr)
+library(plyr)
+library(readr)
+library(stringr)
+library(DT)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() + 
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+```
+
+```{r}
+source('data_import.R')
+rootdata_dir = '/mnt/DATA/Audrey/ca_img_result/data/'
+gen_imgs_dir = '/tmp/'
+
+dat_files = list.files(rootdata_dir, pattern='dat.*.csv', full.names=TRUE)
+all.data = data.frame()
+for (traces_file in dat_files) {
+  print(paste('reading file:', traces_file))
+  data = import.trace(traces_file)
+  all.data = rbind(all.data, data)
+}
+```
+
+
+```{r}
+library(plyr)
+frame.rate.hz = 3
+cell.event.summary = all.data %>%
+  group_by(animal, date, cell_id, exp) %>%
+  dplyr::summarise(dur.sec = max(frame) / frame.rate.hz,
+            m.event = sum(event / dur.sec)) 
+
+min.cell.fr = 0.002
+cells.active.df = filter(cell.event.summary, m.event > min.cell.fr) %>%
+  select(-dur.sec) %>%
+  mutate(animal_cell = paste(animal, cell_id, sep='_'))
+
+recording.summary = cell.event.summary %>%
+  group_by(animal, exp) %>%
+  dplyr::summarise(ncells=n(),nactive=sum(m.event>min.cell.fr))
+```
+
+
+```{r}
+cell.event.summary %>%
+  filter(exp=='Baseline') %>%
+  ggplot() +
+  geom_density(aes(x=m.event, colour=animal)) +
+  xlim(c(-0.002,0.018))
+```
+
+Number of recorded cells
+```{r}
+g.slices = recording.summary %>%
+  filter(exp == 'Baseline') %>%
+  ggplot() +
+  geom_histogram(aes(x=ncells), binwidth=25, fill='white', colour='black') +
+  xlab('# Cells') +
+  ylab('Slices count') +
+  gtheme
+
+g.slices
+```
+
+```{r}
+X = recording.summary %>% filter(exp=='Baseline') %>%
+  mutate(pct_active = round(nactive/ncells * 100))
+DT::datatable(X)
+```
+```{r}
+selected.animals = c('Necab_M13', 'Necab_M11', 'Necab_M8', 'Necab_M3', 'Necab_M4')
+```
+
+Number of active cells with events depending on condition
+```{r}
+recording.summary %>%
+  filter(animal %in% selected.animals) %>%
+  ggplot(aes(x=exp, y=nactive)) +
+  geom_point(aes(colour=exp), size=3) +
+  geom_line(aes(group=animal), size=0.2) +
+  xlab('') + ylab('# Active cells') + gtheme
+```
+
+
+```{r}
+ecdf.summary <- filter(cell.event.summary, animal %in% selected.animals) %>%
+  ddply(.(exp), summarize,
+                      x=unique(m.event),
+                      y=ecdf(m.event)(x))
+ggplot(ecdf.summary, aes(x, y=y, colour=exp)) + 
+  geom_step() +
+  xlab('Event rate (Hz)') +
+  ylab('CDF') +
+  gtheme
+```
+
+
+
+```{r}
+zscore = function(x) {
+  x = (x - mean(x)) / sd(x)
+  return(x)
+}
+
+all.data = ddply(all.data, 
+                 .(date, animal, exp, cell_id), 
+                 mutate, 
+                 ztrace = zscore(strace))
+filtered.all.data = filter(all.data, animal %in% selected.animals) %>%
+  mutate(frame = frame - 50 * frame.rate.hz) %>%
+  filter(frame <= frame.rate.hz * 400, frame >= 0)
+```
+
+```{r}
+animal_file = 'Necab_M4'
+data = filter(all.data, animal == animal_file) 
+```
+
+```{r}
+cells = levels(data$cell_id)
+animal.cells.active.df = filter(cells.active.df, animal == animal_file)
+animal.cells.active = unique(animal.cells.active.df$cell_id)
+selected.cell = as.character(animal.cells.active[1]) %>% as.integer
+
+cell.events = filter(data, event > 0, cell_id == selected.cell)
+g.trace = data %>%
+  filter(cell_id == selected.cell) %>%
+  ggplot() +
+  geom_line(aes(x=frame / frame.rate.hz, y=trace)) +
+  geom_point(data=cell.events, aes(x=frame / frame.rate.hz, y=trace + 1), shape=8, colour='red') +
+  xlim(c(0,500)) +
+  facet_grid(exp ~ .) +
+  xlab('Time (sec)')
+g.trace
+```
+
+```{r}
+source('clusters.R')
+
+make.activity.raster = function(data) {
+  cor.data = get.cor(data, cond='Ach')
+  res.kmeans = eclust(cor.data, FUNcluster = "kmeans", hc_metric = "pearson", k=2, graph=FALSE)
+  clust.data = add.cluster2(data, res.kmeans)
+  g.activity.raster = plot.activity.raster(clust.data) +
+      xlim(c(0,400)) 
+  g.activity.raster
+}
+
+assign.clusters = function(data) {
+  res.kmeans.all = list()
+  for (cond in levels(data$exp)) {
+    exp.data = filter(data, exp==cond)
+    cor.data = get.cor(exp.data)
+    res.kmeans = eclust(cor.data, FUNcluster = "kmeans", hc_metric = "pearson", k=2, graph=FALSE)
+    res.kmeans.all[[cond]] = res.kmeans
+  }
+  res.kmeans.all
+}
+
+plot.cor.dist = function(data, cond, res.kmeans.all) {
+  exp.data = filter(data, exp==cond)
+  res.kmeans = res.kmeans.all[[cond]]
+  cor.data = get.cor(exp.data)
+  dissim.dist = as.dist(1 - cor.data)
+  silhouette.ordered = silhouette(res.kmeans$cluster, dissim.dist) %>% sortSilhouette()
+  dissim.dist.ordered = as.matrix(dissim.dist)[attr(silhouette.ordered, 'iOrd'), attr(silhouette.ordered, 'iOrd')]
+  
+  fviz_dist(as.dist(dissim.dist.ordered), 
+            lab_size = 8, 
+            order = FALSE) + 
+    gtheme +
+    theme(legend.position = 'top',
+          axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()) +
+    xlab('') + ylab('') +
+    labs(fill='Dissimilarity')
+}
+
+g.activity.raster = make.activity.raster(data)
+g.activity.raster
+
+res.kmeans.all = assign.clusters(data)
+
+g.dist.all = plot_grid(
+  plot.cor.dist(data, 'Baseline', res.kmeans.all),
+  plot.cor.dist(data, 'Ach', res.kmeans.all),
+  plot.cor.dist(data, 'Atropine', res.kmeans.all),
+  ncol=3)
+
+g.activity = plot_grid(g.activity.raster, g.dist.all, ncol=1)
+  
+add.cluster.to.all = function(data) {
+  animal.data = data.frame()
+  for (cond in levels(data$exp)) {
+    exp.data = filter(data, exp==cond)
+    res.kmeans = res.kmeans.all[[cond]]
+    exp.data = add.cluster2(exp.data, res.kmeans)
+    if (nrow(animal.data) == 0) {
+      animal.data = exp.data
+    } else {
+      animal.data = bind_rows(animal.data, exp.data)
+    }
+  }
+  animal.data
+}
+
+animal.data = add.cluster.to.all(data)
+
+```
+
+
+Average Silwidths between conditions
+```{r}
+library(tibble)
+
+get.clus.summary = function(res.kmeans.all) {
+  avg.silwidths = rep(0,3)
+  clus.size = rep(0,3)
+  for (i in 1:3) {
+    silinfo = res.kmeans.all[[i]]$silinfo
+    avg.silwidths[i] = max(silinfo$clus.avg.widths)
+    max.cluster.index = which.max(silinfo$clus.avg.widths)
+    clus.size[i] = res.kmeans.all[[i]]$size[max.cluster.index]
+  }
+  
+  data.frame(avg.silwidths=avg.silwidths, 
+             clus.size=clus.size,
+             exp=names(res.kmeans.all))
+}
+
+get.silwidth.df = function(res.kmeans.all) {
+  silwidths = data.frame()
+  exp.names = names(res.kmeans.all)
+  for (i in 1:3) {
+    silinfo = res.kmeans.all[[i]]$silinfo
+    max.cluster.index = which.max(silinfo$clus.avg.widths)
+    swidths = silinfo$widths %>%
+      rownames_to_column('cell_id') %>%
+      mutate(my.clust = if_else(cluster==max.cluster.index, 1, 2)) %>%
+      arrange(my.clust, desc(sil_width)) %>%
+      mutate(row.id = row_number(my.clust)) 
+    swidths$exp = rep(exp.names[i], nrow(swidths))
+    silwidths = bind_rows(silwidths, swidths)
+  }
+  silwidths$exp = factor(silwidths$exp, levels=exp.names)
+  return(silwidths)
+}
+
+clus.summary = get.clus.summary(res.kmeans.all)
+silwidths = get.silwidth.df(res.kmeans.all)
+```
+
+```{r}
+plot.cluster.assignments = function(silwidths) {
+  clust.distance = 100
+  
+ my.clust.df = select(silwidths, cell_id, exp, my.clust) %>%
+    spread(exp, my.clust) %>%
+    arrange(Baseline, Ach, Atropine) 
+ my.clust.df$ordinal = 1:nrow(my.clust.df)
+ rownames(my.clust.df) = my.clust.df$cell_id
+ 
+ ordinal.df = group_by(my.clust.df, Baseline) %>%
+   mutate(Baseline.ordinal=row_number(Baseline))  %>% 
+   ungroup() %>%
+   group_by(Ach) %>%
+   mutate(Ach.ordinal=row_number(Ach))  %>% 
+   ungroup() %>%
+   group_by(Atropine) %>%
+   mutate(Atropine.ordinal=row_number(Atropine))  %>% 
+   ungroup() %>%
+   select(cell_id, ends_with('ordinal')) %>%
+   gather('Baseline.ordinal', 'Ach.ordinal', 'Atropine.ordinal', key='exp', value='ordinal') 
+ 
+  ordinal.df$exp = str_replace(ordinal.df$exp,'.ordinal','')
+  ordinal.df$exp = factor(ordinal.df$exp, levels = levels(silwidths$exp))
+  s = left_join(silwidths, ordinal.df, by=c('cell_id', 'exp'))
+  
+  s %>%
+    group_by(exp,cluster) %>%
+    mutate(row_ordinal = (my.clust - 1) * clust.distance + ordinal) %>%
+    ggplot() +
+    geom_point(aes(x=exp,y=row_ordinal, alpha=sil_width), size=2) +
+    geom_line(aes(x=exp,y=row_ordinal, group=cell_id), alpha=0.2, size=1) +
+    gtheme +
+    scale_y_continuous(trans = "reverse") +
+    xlab('') + ylab('') +
+    #geom_hline(yintercept = 1.3*clust.distance, linetype='dashed', colour='blue', size=1) +
+    theme(axis.ticks.y = element_blank(), 
+          axis.text.y = element_blank(), 
+          axis.line = element_blank(),
+          axis.ticks.x = element_blank(),
+          legend.position = 'none')
+}
+
+plot.cluster.assignments(silwidths)
+
+```
+
+
+
+
+Total activity
+```{r}
+g.cluster.trace = plot.cluster.traces(animal.data)
+g.cluster.trace +
+  xlim(c(0,300))
+```
+
+
+
+
+Autocorrelogram
+```{r}
+get.acf = function(x, acf.sec=40) {
+  acf.res = acf(x, lag.max=frame.rate.hz * acf.sec, plot=FALSE)
+  return(c(acf.res$acf))
+}
+
+acf.sec = 40
+
+get.cluster.autocorr.df = function(animal.data) {
+  mtrace.df = group_by(animal.data, exp, cluster, frame ) %>%
+    dplyr::summarise(m.ztrace=mean(ztrace)) %>%
+    arrange(frame)
+  acf.group = ddply(mtrace.df, .(exp, cluster), summarize,
+                    acf.coeff = get.acf(m.ztrace, acf.sec),
+                    lag=seq(0, acf.sec * frame.rate.hz)/frame.rate.hz) %>%
+    mutate(exp_cluster = paste(exp, cluster, sep='_'))
+  
+  acf.group
+}
+
+plot.autocorr = function(acf.group) {
+  acf.group %>%
+    ggplot() + 
+    geom_line(aes(x = lag, y = acf.coeff, group=exp_cluster, colour=cluster)) +
+    geom_hline(yintercept=0, linetype='dashed') +
+    facet_grid(. ~ exp) +
+    gtheme +
+    xlab('Lag (sec)') +
+    ylab('Autocorrelation') +
+    theme(legend.position='top')
+}
+
+g.autocorr = get.cluster.autocorr.df(animal.data) %>% plot.autocorr()
+g.autocorr
+
+```
+
+Bin data
+```{r}
+library(pracma)
+bin.dur.sec = 30
+all.data.binned = filtered.all.data %>%
+  mutate(all.data, bin = ceil(frame / (bin.dur.sec * frame.rate.hz))) 
+all.data.binned$bin = as.factor(all.data.binned$bin)
+all.data.binned = all.data.binned %>%
+  ddply(.(date, animal, exp, bin, cell_id), summarize, 
+        df.auc = trapz(frame, ztrace),
+        sevent.rate = sum(sevent) / bin.dur.sec,
+        event.rate = sum(event) / bin.dur.sec)
+```
+
+```{r}
+binned.summary = all.data.binned %>%
+  group_by(exp,bin) %>%
+  dplyr::summarise(mean.auc = mean(df.auc),
+                   mer = mean(event.rate))
+ggplot(binned.summary) +
+  geom_line(aes(x=as.integer(bin) * bin.dur.sec, y=mean.auc, colour=exp))
+```
+
+
+
+Mean trace change for the same cell
+TODO: look at AUC instead
+```{r}
+library(pracma)
+
+create.cell.summary = function(data, first.sec=500) {
+  data %>%
+  filter(frame < first.sec * frame.rate.hz) %>%
+  group_by(date, animal, exp, cell_id) %>%
+  dplyr::summarise(
+            m.trace=mean(ztrace), 
+            nevents=sum(sevent),
+            dur.sec = max(frame) / frame.rate.hz,
+            df.auc = trapz(frame, ztrace) / max(frame),
+            m.event=nevents/dur.sec) %>%
+  dplyr::mutate(mouse_cell=paste(animal, cell_id, sep='_'))
+}
+
+data.summary = create.cell.summary(filtered.all.data)
+```
+
+
+
+```{r}
+data.summary %>%
+  ggplot(aes(x=exp, y=df.auc)) +
+  geom_point(aes(colour=animal)) +
+  geom_line(aes(group=mouse_cell), size=0.2) +
+  xlab('') + ylab('dF/F AUC')
+``` 
+
+```{r}
+ecdf.summary <- ddply(data.summary, .(exp), summarize,
+                      x=unique(m.event),
+                      y=ecdf(m.event)(x))
+g.event.cdf = ggplot(ecdf.summary, aes(x, y=y, colour=exp)) + 
+  geom_step() +
+  xlab('Event rate (Hz)') +
+  ylab('CDF') +
+  gtheme
+g.event.cdf
+```
+Calculate AUC for dF
+```{r}
+data.summary %>%
+  ggplot() +
+  #geom_density(aes(x=df.auc, y=..density.., group=animal), bw=0.07, size=0.7, colour='grey') +
+  geom_histogram(aes(x=df.auc ), size=1) +
+  gtheme +
+  facet_grid(. ~ exp) +
+  xlab('dF/F AUC')
+
+```
+
+```{r}
+diff.exp = function(vals, exps, diff.order) {
+  df = data.frame(x=vals, exp=exps)
+  base_i = which(exps==diff.order[1])
+  ach_i = which(exps==diff.order[2])
+  return(vals[base_i] - vals[ach_i])
+}
+
+calculate.metric.diff = function(data, diff.order, var.name) {
+  data %>%
+    filter(exp %in% diff.order) %>%
+    rename_(var = 'var.name') %>%
+    ddply(.(animal, cell_id), summarize, var.diff=diff.exp(var, exp, diff.order)) 
+}
+
+plot.metric.diff = function(data, gauss.width=0.05, show.groups=TRUE) {
+  g = ggplot(data) +
+    geom_vline(xintercept=0, linetype='dashed', colour='red', size=1) +
+    gtheme 
+  if (show.groups) {
+    g = g + 
+      geom_density(aes(x=var.diff, y=..density.., group=animal), bw=gauss.width, size=0.7, colour='grey') +
+      geom_density(aes(x=var.diff, y=..density..), size=1) 
+  } else {
+    g = g + geom_histogram(aes(x=var.diff)) 
+  }
+  return(g)
+}
+
+diff.order = c('Baseline', 'Ach')
+g.diff.ach.auc = calculate.metric.diff(data.summary, diff.order, 'df.auc') %>%
+  plot.metric.diff(gauss.width = 0.15) +
+  xlab('Baseline - Ach dF/F AUC')
+g.diff.ach.auc
+```
+
+
+
+```{r}
+diff.order = c('Ach', 'Atropine')
+g.diff.atr.auc = calculate.metric.diff(data.summary, diff.order, 'df.auc') %>%
+  plot.metric.diff(gauss.width = 0.19) +
+  xlab('Ach - Atropine dF/F AUC')
+g.diff.atr.auc
+```
+
+
+```{r}
+data.summary %>%
+  ggplot(aes(x=exp, y=m.event)) +
+  geom_point(aes(colour=animal)) +
+  geom_line(aes(group=mouse_cell), size=0.2) +
+  xlab('') + ylab('Cell event rate (Hz)')
+```
+Distribution of changes in event rates -- should group by recording
+```{r}
+diff.order = c('Baseline', 'Ach')
+g.diff.ach.mer = calculate.metric.diff(data.summary, diff.order, 'm.event') %>%
+  plot.metric.diff(gauss.width = 0.002) +
+  xlab('Event rate difference: Baseline - Ach (Hz)')
+g.diff.ach.mer 
+```
+```{r}
+diff.order = c('Ach', 'Atropine')
+g.diff.atr.mer = calculate.metric.diff(data.summary, diff.order, 'm.event') %>%
+  plot.metric.diff(gauss.width = 0.003) +
+  xlab('Event rate difference: Ach - Atropine (Hz)')
+g.diff.atr.mer 
+```
+
+Create summary of clusters for each animal
+
+```{r}
+
+clus.summary.all = data.frame()
+clus.autocorr.all = data.frame()
+for (animal_id in unique(filtered.all.data$animal)) {
+  data = filter(filtered.all.data, animal == animal_id)
+  res.kmeans.all = assign.clusters(data)
+  g.dist.all = plot_grid(
+    plot.cor.dist(data, 'Baseline', res.kmeans.all),
+    plot.cor.dist(data, 'Ach', res.kmeans.all),
+    plot.cor.dist(data, 'Atropine', res.kmeans.all),
+    ncol=3)
+  g.activity.raster = make.activity.raster(data)
+
+  animal.data = add.cluster.to.all(data)
+  
+  clus.summary = get.clus.summary(res.kmeans.all)
+  clus.summary$animal = rep(animal_id, 3)
+  clus.summary.all = bind_rows(clus.summary.all, clus.summary)
+  
+  silwidths = get.silwidth.df(res.kmeans.all)
+  g.cluster.assignments = plot.cluster.assignments(silwidths)
+  
+  clus.autocorr.df = get.cluster.autocorr.df(animal.data) 
+  clus.autocorr.df$animal = rep(animal_id, nrow(clus.autocorr.df))
+  clus.autocorr.all = bind_rows(clus.autocorr.all, clus.autocorr.df)
+  g.autocorr = plot.autocorr(clus.autocorr.df)
+  
+  g.footer = plot_grid(g.cluster.assignments, g.autocorr, 
+                       nrow=1, labels=c('', 'D'), label_size = 32)
+  
+  g = plot_grid(g.activity.raster, 
+                g.dist.all, 
+                g.footer, 
+                labels = c('A','B', 'C'),
+                label_size = 32,
+                ncol=1, rel_heights = c(3, 3, 2))
+  
+  
+  ggsave(paste0(gen_imgs_dir, '/cluster_img_', animal_id, '.png'), 
+         g,
+         units='cm',
+         width=35,
+         height=30)
+  
+  # animal.data = filter(all.data, animal == animal_id)
+  # animal.data = add.cluster(animal.data)
+  # g1 = plot.activity.raster(animal.data) +
+  #   xlim(c(0,300))
+  # g2 = plot.cluster.traces(animal.data)
+  # cell.summary = create.cell.summary(animal.data)
+  # 
+  # diff.order = c('Baseline', 'Ach')
+  # g3 = calculate.metric.diff(cell.summary, diff.order, 'df.auc') %>%
+  #   plot.metric.diff(show.groups = FALSE) +
+  #   xlab('Baseline - Ach dF/F AUC')
+  # g5 = calculate.metric.diff(cell.summary, diff.order, 'm.event') %>%
+  #   plot.metric.diff(show.groups = FALSE) +
+  #   xlab('Event rate: Baseline - Ach (Hz)')
+  # 
+  # diff.order = c('Ach', 'Atropine')
+  # g4 = calculate.metric.diff(cell.summary, diff.order, 'df.auc') %>%
+  #   plot.metric.diff(show.groups = FALSE) +
+  #   xlab('Ach - Atropine dF/F AUC')
+  # g6 = calculate.metric.diff(cell.summary, diff.order, 'm.event') %>%
+  #   plot.metric.diff(show.groups = FALSE) +
+  #   xlab('Event rate: Baseline - Ach (Hz)')
+  # 
+  # g_foot = plot_grid(g3, g4, g5, g6, ncol=2)
+  # 
+  # g_top = plot_grid(g1, g2, ncol=1, rel_heights = c(1.5, 1))
+  # g = plot_grid(g_top, g_foot, ncol=1, rel_heights = c(3, 1))
+  # ggsave(paste0(gen_imgs_dir, '/cluster_trace_', animal_id, '.png'), 
+  #        g,
+  #        units='cm',
+  #        width=35,
+  #        height=30)
+}
+
+clus.summary.all$animal = as.factor(clus.summary.all$animal)
+clus.autocorr.all$animal = as.factor(clus.autocorr.all$animal)
+clus.summary.all$exp = factor(clus.summary.all$exp, levels=levels(filtered.all.data$exp))
+clus.autocorr.all$exp = factor(clus.autocorr.all$exp, levels=levels(filtered.all.data$exp))
+```
+
+Clus summary
+```{r}
+g.sil.widths = clus.summary.all %>%
+  ggplot(aes(x=exp, y=avg.silwidths)) +
+  geom_line(aes(group=animal), alpha=0.6) +
+  geom_point(size=3, alpha=0.5) +
+  # stat_compare_means(aes(label = paste0('p=', ..p.format..)),
+  #                    method='wilcox.test', paired=TRUE, 
+  #                    comparisons = list(c(1,2), c(2,3)))  +
+  gtheme +
+  xlab('') + ylab('Mean silhouette width') +
+  theme(legend.position = 'none')
+
+g.sil.widths
+```
+
+```{r}
+clus.autocorr.summary = clus.autocorr.all %>%
+  filter(cluster == 2) %>%
+  group_by(exp, lag) %>%
+  dplyr::summarize(acf.coeff.m=mean(acf.coeff),
+                   acf.coeff.sd=sd(acf.coeff))
+  
+  
+clus.autocorr.all %>%
+  filter(cluster == 2) %>%
+  mutate(animal_clus = paste(animal, str(cluster), sep='_')) %>%
+  ggplot(aes(x=lag, y=acf.coeff)) +
+  geom_line(aes(group=animal_clus), alpha=0.2) +
+  geom_line(data=clus.autocorr.summary, aes(x=lag, y=acf.coeff.m), size=1) +
+  facet_grid(. ~  exp) +
+  gtheme +
+  geom_hline(yintercept=0, linetype='dashed', color='red') +
+  xlab('Lag (sec)') +
+  ylab('Autocorrelation') 
+  
+g.acorr.summary = ggplot(clus.autocorr.summary) +
+  geom_ribbon(data=clus.autocorr.summary, 
+              aes(x=lag, ymin=acf.coeff.m - acf.coeff.sd, ymax=acf.coeff.m + acf.coeff.sd), 
+              fill = "grey80", color='black', size=0.2) +
+  geom_line(data=clus.autocorr.summary, aes(x=lag, y=acf.coeff.m), size=1) +
+  facet_grid(. ~  exp) +
+  geom_hline(yintercept=0, linetype='dashed', color='red') +
+  gtheme +
+  xlab('Lag (sec)') +
+  ylab('Autocorrelation') 
+
+g.acorr.summary
+```
+Time to first peak
+```{r}
+get.fst.peak.index = function(x, y) {
+  filter.width = 3
+  y.filtered = stats::filter(y, rep(1/filter.width, filter.width), sides=2)
+  
+  local.maxima = which(diff(sign(diff(y)))==-2)+1
+  
+  local.maxima.filtered = c()
+  fst.negative = which(sign(y+0.01) == -1)[1]
+  for (local.maxium.index in local.maxima) {
+    window = 2
+    if (local.maxium.index - window > 0 &&
+        local.maxium.index + window <= length(y) &&
+        fst.negative < local.maxium.index &&
+        all(y[local.maxium.index + -window:window] > 0.00)) {
+      local.maxima.filtered = c(local.maxima.filtered, local.maxium.index)
+    }
+  }
+  
+  if (length(local.maxima.filtered) == 0) {
+    return(NA)
+  }
+  index = local.maxima.filtered[1]
+  list(index=index, time=x[index], val=y[index])
+}
+
+
+autocorr.peak.df = ddply(clus.autocorr.all, 
+      .(animal, exp, cluster), 
+      summarize,
+      peak.index=get.fst.peak.index(lag, acf.coeff)['index'] %>% unlist,
+      peak.time=get.fst.peak.index(lag, acf.coeff)['time'] %>% unlist,
+      peak.val=get.fst.peak.index(lag, acf.coeff)['val'] %>% unlist) %>%
+  filter(cluster == 2)
+
+summary(subset(autocorr.peak.df, exp=='Baseline')$peak.val, digits=1)
+summary(subset(autocorr.peak.df, exp=='Ach')$peak.val, digits=1)
+```
+
+```{r}
+library(ggpubr)
+
+# autocorr.peak.df %>%
+#   filter(exp %in% c('Baseline', 'Ach')) %>%
+#   ggpubr::ggpaired(x='exp', y='peak.time', id='animal') +
+#   stat_compare_means(aes(label = paste0('p=', ..p.format..)),
+#                      method='wilcox.test', paired=TRUE, na.rm=TRUE) 
+
+autocorr.peak.df %>%
+  filter(exp %in% c('Baseline', 'Ach')) %>%
+  ggplot(aes(x=exp, y=peak.time)) +
+  geom_line(aes(group=animal)) +
+  geom_point(size=3, alpha=0.6) +
+   #stat_compare_means(aes(label = paste0('p=', ..p.format..)),
+   #                   method='wilcox.test', paired=TRUE, 
+   #                   comparisons = list(c(1,2)))  +
+  xlab('') + ylab('Periodicty of activity (sec)') +
+  gtheme
+
+#t.test(peak.time ~ exp, X, paired=TRUE)
+```
+
+```{r}
+plot_grid(g.sil.widths, g.acorr.summary,
+          labels=c('A', 'B'), label_size = 32,
+          rel_widths = c(2,3))
+
+ggsave(paste0(gen_imgs_dir, '/fig_clus_sum.png'), 
+       units='cm',
+       width=22,
+       height=10)
+```
+
+
+```{r}
+ggsave(paste0(gen_imgs_dir, '2_cells_hist.png'), g.slices)
+
+#g.cor.heatmap
+g1 = plot_grid(g.trace,  g.activity.raster, 
+               g.cluster.trace,
+               g.autocorr, ncol=1, rel_heights = c(1,2, 1.5, 1))
+ggsave(paste0(gen_imgs_dir, '/Fig1.png'), 
+       g1,
+       units='cm',
+       width=30,
+       height=40)
+
+g2 = plot_grid(g.diff.ach.auc, g.diff.atr.auc, 
+               g.diff.ach.mer, g.diff.atr.mer, 
+               g.event.cdf, ncol=2)
+ggsave(paste0(gen_imgs_dir, '/Fig2.png'), 
+       g2,
+       units='cm',
+       width=30,
+       height=25)
+```
+

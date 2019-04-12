@@ -1,8 +1,10 @@
 ---
-title: "Ach network effect analysis"
+title: "ACh network effect analysis"
 output: html_notebook
 ---
 ```{r}
+knitr::opts_chunk$set(include=TRUE, collapse=TRUE, warning=FALSE, echo=FALSE)
+
 library(dplyr)
 library(plyr)
 library(readr)
@@ -13,7 +15,7 @@ library(ggplot2)
 library(cowplot)
 gtheme = theme_minimal() + theme_cowplot() + 
   theme(text = element_text(size=18), axis.text = element_text(size=15))
-
+library(viridis)
 ```
 
 ```{r}
@@ -39,7 +41,14 @@ cell.event.summary = all.data %>%
   dplyr::summarise(dur.sec = max(frame) / frame.rate.hz,
             m.event = sum(event / dur.sec)) 
 
-min.cell.fr = 0.002
+min.cell.fr = 0.003
+
+cell.event.summary = cell.event.summary %>%
+  ddply(.(animal, cell_id), summarise,
+      isactive=max(m.event) > min.cell.fr) %>% 
+  right_join(cell.event.summary, by=c('animal', 'cell_id'))
+  
+
 cells.active.df = filter(cell.event.summary, m.event > min.cell.fr) %>%
   select(-dur.sec) %>%
   mutate(animal_cell = paste(animal, cell_id, sep='_'))
@@ -52,7 +61,7 @@ recording.summary = cell.event.summary %>%
 
 ```{r}
 cell.event.summary %>%
-  filter(exp=='Baseline') %>%
+  filter(exp=='ACh') %>%
   ggplot() +
   geom_density(aes(x=m.event, colour=animal)) +
   xlim(c(-0.002,0.018))
@@ -61,10 +70,10 @@ cell.event.summary %>%
 Number of recorded cells
 ```{r}
 g.slices = recording.summary %>%
-  filter(exp == 'Baseline') %>%
+  filter(exp == 'Ctrl') %>%
   ggplot() +
   geom_histogram(aes(x=ncells), binwidth=25, fill='white', colour='black') +
-  xlab('# Cells') +
+  xlab('# Active Cells') +
   ylab('Slices count') +
   gtheme
 
@@ -72,13 +81,40 @@ g.slices
 ```
 
 ```{r}
-X = recording.summary %>% filter(exp=='Baseline') %>%
+X = recording.summary %>% filter(exp=='Ctrl') %>%
   mutate(pct_active = round(nactive/ncells * 100))
 DT::datatable(X)
 ```
+Pct of cells active at any condition
+```{r}
+cell.event.summary %>% 
+  group_by(animal) %>% 
+  dplyr::summarise(n=n()/3, 
+                   pct_active=round(sum(isactive)/3/n * 100) ) %>% 
+  arrange(desc(pct_active)) %>%
+  DT::datatable()
+```
+
+
 ```{r}
 selected.animals = c('Necab_M13', 'Necab_M11', 'Necab_M8', 'Necab_M3', 'Necab_M4')
 ```
+
+Change of # active neurons depending on condition
+```{r}
+all.data %>%
+  filter(animal %in% selected.animals) %>%
+  group_by(animal, date, cell_id, exp) %>%
+  dplyr::summarise(dur.sec = max(frame) / frame.rate.hz,
+                   nevents = sum(event),
+            m.event = sum(event / dur.sec)) %>%
+  mutate(isactive = nevents > 0,
+         animal_cell =paste(animal, cell_id, sep='_')) %>% #filter(animal=='Necab_M11', exp=='ACh') %>% View
+  filter(animal_cell %in% cells.active.df$animal_cell) %>% 
+  group_by(animal, exp) %>%
+  dplyr::summarise(ncells=n(), nactive=sum(isactive), 'Active %'=round(nactive/ncells*100))
+```
+
 
 Number of active cells with events depending on condition
 ```{r}
@@ -92,7 +128,7 @@ recording.summary %>%
 
 
 ```{r}
-ecdf.summary <- filter(cell.event.summary, animal %in% selected.animals) %>%
+ecdf.summary <- filter(cell.event.summary, animal %in% selected.animals, isactive==TRUE) %>%
   ddply(.(exp), summarize,
                       x=unique(m.event),
                       y=ecdf(m.event)(x))
@@ -117,11 +153,12 @@ all.data = ddply(all.data,
                  ztrace = zscore(strace))
 filtered.all.data = filter(all.data, animal %in% selected.animals) %>%
   mutate(frame = frame - 50 * frame.rate.hz) %>%
-  filter(frame <= frame.rate.hz * 400, frame >= 0)
+  filter(frame <= frame.rate.hz * 400, frame >= 0) %>%
+  filter(paste(animal_id, cell_id, sep='_') %in% cells.active.df$animal_cell)
 ```
 
 ```{r}
-animal_file = 'Necab_M4'
+animal_file = 'Necab_M13'
 data = filter(all.data, animal == animal_file) 
 ```
 
@@ -129,7 +166,8 @@ data = filter(all.data, animal == animal_file)
 cells = levels(data$cell_id)
 animal.cells.active.df = filter(cells.active.df, animal == animal_file)
 animal.cells.active = unique(animal.cells.active.df$cell_id)
-selected.cell = as.character(animal.cells.active[1]) %>% as.integer
+selected.cell = as.character(animal.cells.active[2]) %>% as.integer
+data = filter(data, cell_id %in% animal.cells.active)
 
 cell.events = filter(data, event > 0, cell_id == selected.cell)
 g.trace = data %>%
@@ -147,7 +185,7 @@ g.trace
 source('clusters.R')
 
 make.activity.raster = function(data) {
-  cor.data = get.cor(data, cond='Ach')
+  cor.data = get.cor(data, cond='ACh')
   res.kmeans = eclust(cor.data, FUNcluster = "kmeans", hc_metric = "pearson", k=2, graph=FALSE)
   clust.data = add.cluster2(data, res.kmeans)
   g.activity.raster = plot.activity.raster(clust.data) +
@@ -177,6 +215,7 @@ plot.cor.dist = function(data, cond, res.kmeans.all) {
   fviz_dist(as.dist(dissim.dist.ordered), 
             lab_size = 8, 
             order = FALSE) + 
+    scale_fill_viridis(direction=-1) +
     gtheme +
     theme(legend.position = 'top',
           axis.line = element_blank(),
@@ -192,9 +231,9 @@ g.activity.raster
 res.kmeans.all = assign.clusters(data)
 
 g.dist.all = plot_grid(
-  plot.cor.dist(data, 'Baseline', res.kmeans.all),
-  plot.cor.dist(data, 'Ach', res.kmeans.all),
-  plot.cor.dist(data, 'Atropine', res.kmeans.all),
+  plot.cor.dist(data, 'Ctrl', res.kmeans.all),
+  plot.cor.dist(data, 'ACh', res.kmeans.all),
+  plot.cor.dist(data, 'Atr', res.kmeans.all),
   ncol=3)
 
 g.activity = plot_grid(g.activity.raster, g.dist.all, ncol=1)
@@ -266,21 +305,21 @@ plot.cluster.assignments = function(silwidths) {
   
  my.clust.df = select(silwidths, cell_id, exp, my.clust) %>%
     spread(exp, my.clust) %>%
-    arrange(Baseline, Ach, Atropine) 
+    arrange(Ctrl, ACh, Atr) 
  my.clust.df$ordinal = 1:nrow(my.clust.df)
  rownames(my.clust.df) = my.clust.df$cell_id
  
- ordinal.df = group_by(my.clust.df, Baseline) %>%
-   mutate(Baseline.ordinal=row_number(Baseline))  %>% 
+ ordinal.df = group_by(my.clust.df, Ctrl) %>%
+   mutate(Ctrl.ordinal=row_number(Ctrl))  %>% 
    ungroup() %>%
-   group_by(Ach) %>%
-   mutate(Ach.ordinal=row_number(Ach))  %>% 
+   group_by(ACh) %>%
+   mutate(ACh.ordinal=row_number(ACh))  %>% 
    ungroup() %>%
-   group_by(Atropine) %>%
-   mutate(Atropine.ordinal=row_number(Atropine))  %>% 
+   group_by(Atr) %>%
+   mutate(Atr.ordinal=row_number(Atr))  %>% 
    ungroup() %>%
    select(cell_id, ends_with('ordinal')) %>%
-   gather('Baseline.ordinal', 'Ach.ordinal', 'Atropine.ordinal', key='exp', value='ordinal') 
+   gather('Ctrl.ordinal', 'ACh.ordinal', 'Atr.ordinal', key='exp', value='ordinal') 
  
   ordinal.df$exp = str_replace(ordinal.df$exp,'.ordinal','')
   ordinal.df$exp = factor(ordinal.df$exp, levels = levels(silwidths$exp))
@@ -361,24 +400,92 @@ g.autocorr
 Bin data
 ```{r}
 library(pracma)
-bin.dur.sec = 30
-all.data.binned = filtered.all.data %>%
-  mutate(all.data, bin = ceil(frame / (bin.dur.sec * frame.rate.hz))) 
-all.data.binned$bin = as.factor(all.data.binned$bin)
-all.data.binned = all.data.binned %>%
+bin.dur.sec = 3
+all.data.binned.tmp = filtered.all.data %>%
+  mutate(bin = ceil(frame / (bin.dur.sec * frame.rate.hz))) 
+all.data.binned.tmp$bin = as.factor(all.data.binned.tmp$bin)
+all.data.binned = all.data.binned.tmp %>%
   ddply(.(date, animal, exp, bin, cell_id), summarize, 
-        df.auc = trapz(frame, ztrace),
+        df.auc = trapz(frame, ztrace) / length(frame),
         sevent.rate = sum(sevent) / bin.dur.sec,
-        event.rate = sum(event) / bin.dur.sec)
+        event.rate = sum(event) / bin.dur.sec,
+        has.event = sum(event) > 0,
+        ztrace.max = sort(ztrace, decreasing=TRUE)[2])
+
+animal.data.binned = all.data.binned.tmp %>%
+  ddply(.(date, animal, exp, bin), summarize, 
+        ztrace.mean = mean(ztrace))
+```
+
+Identify population events
+```{r}
+animal.data.binned$bin = as.integer(animal.data.binned$bin)
+animal.data.binned = animal.data.binned %>%
+  ddply(.(animal), mutate,
+        ztrace.mean.sd = sd(ztrace.mean[1:300/bin.dur.sec])) 
+
+pop.event.thr = 2
+animal.data.peaks = animal.data.binned %>%
+  arrange(bin) %>%
+  ddply(.(animal, exp), mutate,
+        local.maximum = c(0, diff(sign(diff(ztrace.mean)))==-2, 0)) %>%
+  mutate(is.pop.event=local.maximum & (ztrace.mean > pop.event.thr * ztrace.mean.sd))  %>%
+  filter(is.pop.event)
+
+animal_name = 'Necab_M3'
+animal.data.binned %>%
+  filter(animal==animal_name) %>%
+  ggplot() +
+  geom_line(aes(x=bin * bin.dur.sec, y=ztrace.mean)) +
+  geom_hline(aes(yintercept= pop.event.thr * ztrace.mean.sd), linetype='dashed') +
+  geom_point(data=subset(animal.data.peaks, animal==animal_name),
+             aes(x=bin*bin.dur.sec, y=ztrace.mean + 0.3), shape=8, colour='red') +
+  facet_grid(exp ~ .) +
+  xlab('Time (sec)') + ylab('zscored dF/F') +
+  gtheme
+  
 ```
 
 ```{r}
-binned.summary = all.data.binned %>%
-  group_by(exp,bin) %>%
-  dplyr::summarise(mean.auc = mean(df.auc),
-                   mer = mean(event.rate))
-ggplot(binned.summary) +
-  geom_line(aes(x=as.integer(bin) * bin.dur.sec, y=mean.auc, colour=exp))
+all.data.binned$bin = as.integer(all.data.binned$bin)
+left_join(all.data.binned, animal.data.peaks, by=c('date', 'animal', 'exp', 'bin')) %>% 
+  filter(is.pop.event) %>% 
+  group_by(animal, exp, bin) %>% 
+  dplyr::summarise(ncells=n(), 
+                   nactive=sum(has.event),
+                   nactive2=sum(ztrace.max > (ztrace.mean + pop.event.thr * ztrace.mean.sd))) ->
+  pop.active.df
+
+DT::datatable(pop.active.df)
+```
+
+```{r}
+pop.active.summary = pop.active.df %>%
+  group_by(animal, exp) %>%
+  #filter(animal != 'Necab_M4') %>%
+  dplyr::summarise(active.m=mean(nactive2) %>% round(),
+                   active.pct.m=active.m/ncells[1] * 100 %>% round(0),
+                   active.sd=sd(nactive2) %>% round(),
+                   active.pct.sd=sd(nactive2/ncells[1]*100) %>% round,
+                   nevents=n(),
+                   events.freq=round(nevents / (max(bin+1) * bin.dur.sec),3))
+
+DT::datatable(pop.active.summary)
+
+pop.active.summary %>%
+  group_by(exp) %>%
+  dplyr::summarise('Median active neurons (%)' = round(median(active.pct.m)),
+                   'std (%)'=round(sd(active.pct.m)),
+                   'Median freq of population events (Hz)'=round(median(events.freq),3),
+                   'std (Hz)'=round(sd(events.freq),2))
+
+ggplot(pop.active.summary, aes(x=exp,y=active.pct.m)) +
+  geom_line(aes(group=animal), alpha=0.4) +
+  geom_point(aes(color=animal, size=nevents), alpha=0.6) +
+  gtheme +
+  xlab('') + ylab('Participation in population events (%)') +
+  ylim(c(0,100))
+ggsave(paste0(gen_imgs_dir, 'pop_events_participation.png'))
 ```
 
 
@@ -466,20 +573,20 @@ plot.metric.diff = function(data, gauss.width=0.05, show.groups=TRUE) {
   return(g)
 }
 
-diff.order = c('Baseline', 'Ach')
+diff.order = c('Ctrl', 'ACh')
 g.diff.ach.auc = calculate.metric.diff(data.summary, diff.order, 'df.auc') %>%
   plot.metric.diff(gauss.width = 0.15) +
-  xlab('Baseline - Ach dF/F AUC')
+  xlab('Ctrl - ACh dF/F AUC')
 g.diff.ach.auc
 ```
 
 
 
 ```{r}
-diff.order = c('Ach', 'Atropine')
+diff.order = c('ACh', 'Atr')
 g.diff.atr.auc = calculate.metric.diff(data.summary, diff.order, 'df.auc') %>%
   plot.metric.diff(gauss.width = 0.19) +
-  xlab('Ach - Atropine dF/F AUC')
+  xlab('ACh - Atr dF/F AUC')
 g.diff.atr.auc
 ```
 
@@ -493,17 +600,17 @@ data.summary %>%
 ```
 Distribution of changes in event rates -- should group by recording
 ```{r}
-diff.order = c('Baseline', 'Ach')
+diff.order = c('Ctrl', 'ACh')
 g.diff.ach.mer = calculate.metric.diff(data.summary, diff.order, 'm.event') %>%
   plot.metric.diff(gauss.width = 0.002) +
-  xlab('Event rate difference: Baseline - Ach (Hz)')
+  xlab('Event rate difference: Ctrl - ACh (Hz)')
 g.diff.ach.mer 
 ```
 ```{r}
-diff.order = c('Ach', 'Atropine')
+diff.order = c('ACh', 'Atr')
 g.diff.atr.mer = calculate.metric.diff(data.summary, diff.order, 'm.event') %>%
   plot.metric.diff(gauss.width = 0.003) +
-  xlab('Event rate difference: Ach - Atropine (Hz)')
+  xlab('Event rate difference: ACh - Atr (Hz)')
 g.diff.atr.mer 
 ```
 
@@ -517,9 +624,9 @@ for (animal_id in unique(filtered.all.data$animal)) {
   data = filter(filtered.all.data, animal == animal_id)
   res.kmeans.all = assign.clusters(data)
   g.dist.all = plot_grid(
-    plot.cor.dist(data, 'Baseline', res.kmeans.all),
-    plot.cor.dist(data, 'Ach', res.kmeans.all),
-    plot.cor.dist(data, 'Atropine', res.kmeans.all),
+    plot.cor.dist(data, 'Ctrl', res.kmeans.all),
+    plot.cor.dist(data, 'ACh', res.kmeans.all),
+    plot.cor.dist(data, 'Atr', res.kmeans.all),
     ncol=3)
   g.activity.raster = make.activity.raster(data)
 
@@ -561,21 +668,21 @@ for (animal_id in unique(filtered.all.data$animal)) {
   # g2 = plot.cluster.traces(animal.data)
   # cell.summary = create.cell.summary(animal.data)
   # 
-  # diff.order = c('Baseline', 'Ach')
+  # diff.order = c('Ctrl', 'ACh')
   # g3 = calculate.metric.diff(cell.summary, diff.order, 'df.auc') %>%
   #   plot.metric.diff(show.groups = FALSE) +
-  #   xlab('Baseline - Ach dF/F AUC')
+  #   xlab('Ctrl - ACh dF/F AUC')
   # g5 = calculate.metric.diff(cell.summary, diff.order, 'm.event') %>%
   #   plot.metric.diff(show.groups = FALSE) +
-  #   xlab('Event rate: Baseline - Ach (Hz)')
+  #   xlab('Event rate: Ctrl - ACh (Hz)')
   # 
-  # diff.order = c('Ach', 'Atropine')
+  # diff.order = c('ACh', 'Atr')
   # g4 = calculate.metric.diff(cell.summary, diff.order, 'df.auc') %>%
   #   plot.metric.diff(show.groups = FALSE) +
-  #   xlab('Ach - Atropine dF/F AUC')
+  #   xlab('ACh - Atr dF/F AUC')
   # g6 = calculate.metric.diff(cell.summary, diff.order, 'm.event') %>%
   #   plot.metric.diff(show.groups = FALSE) +
-  #   xlab('Event rate: Baseline - Ach (Hz)')
+  #   xlab('Event rate: Ctrl - ACh (Hz)')
   # 
   # g_foot = plot_grid(g3, g4, g5, g6, ncol=2)
   # 
@@ -679,21 +786,21 @@ autocorr.peak.df = ddply(clus.autocorr.all,
       peak.val=get.fst.peak.index(lag, acf.coeff)['val'] %>% unlist) %>%
   filter(cluster == 2)
 
-summary(subset(autocorr.peak.df, exp=='Baseline')$peak.val, digits=1)
-summary(subset(autocorr.peak.df, exp=='Ach')$peak.val, digits=1)
+summary(subset(autocorr.peak.df, exp=='Ctrl')$peak.val, digits=1)
+summary(subset(autocorr.peak.df, exp=='ACh')$peak.val, digits=1)
 ```
 
 ```{r}
 library(ggpubr)
 
 # autocorr.peak.df %>%
-#   filter(exp %in% c('Baseline', 'Ach')) %>%
+#   filter(exp %in% c('Ctrl', 'ACh')) %>%
 #   ggpubr::ggpaired(x='exp', y='peak.time', id='animal') +
 #   stat_compare_means(aes(label = paste0('p=', ..p.format..)),
 #                      method='wilcox.test', paired=TRUE, na.rm=TRUE) 
 
 autocorr.peak.df %>%
-  filter(exp %in% c('Baseline', 'Ach')) %>%
+  filter(exp %in% c('Ctrl', 'ACh')) %>%
   ggplot(aes(x=exp, y=peak.time)) +
   geom_line(aes(group=animal)) +
   geom_point(size=3, alpha=0.6) +
@@ -713,8 +820,25 @@ plot_grid(g.sil.widths, g.acorr.summary,
 
 ggsave(paste0(gen_imgs_dir, '/fig_clus_sum.png'), 
        units='cm',
-       width=22,
-       height=10)
+       width=23,
+       height=11)
+```
+
+```{r}
+g.footer = plot_grid(g.acorr.summary, g.sil.widths,
+          labels=c('', 'D'), ncol=2,
+          rel_widths=c(2,1), 
+          label_size=32)
+plot_grid(g.activity.raster,
+          g.dist.all,
+          g.footer,
+          labels=c('A', 'B', 'C'), ncol=1,
+          rel_heights=c(1.8,1.5,1.5), 
+          label_size=32)
+
+ggsave(paste0(gen_imgs_dir, 'fig.pdf'), 
+       units='cm',
+       width=25, height=35)
 ```
 
 
@@ -731,9 +855,10 @@ ggsave(paste0(gen_imgs_dir, '/Fig1.png'),
        width=30,
        height=40)
 
-g2 = plot_grid(g.diff.ach.auc, g.diff.atr.auc, 
+g2 = plot_grid(#g.diff.ach.auc, g.diff.atr.auc, 
                g.diff.ach.mer, g.diff.atr.mer, 
-               g.event.cdf, ncol=2)
+               g.event.cdf, ncol=2,
+               labels=c('A', 'B', 'C'), label_size = 32)
 ggsave(paste0(gen_imgs_dir, '/Fig2.png'), 
        g2,
        units='cm',

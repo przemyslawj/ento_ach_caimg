@@ -28,7 +28,10 @@ import.trace = function(traces_file) {
     inner_join(strace.data, by=meta.cols) %>%
     inner_join(sevent.data, by=meta.cols)
   data$cell_id = as.factor(data$cell_id)
-  data$exp = factor(data$exp, levels=c('Baseline', 'Ach', 'Atropine'))
+  data$exp = str_replace(data$exp, 'Baseline', 'Ctrl')
+  data$exp = str_replace(data$exp, 'Ach', 'ACh')
+  data$exp = str_replace(data$exp, 'Atropine', 'Atr')
+  data$exp = factor(data$exp, levels=c('Ctrl', 'ACh', 'Atr'))
   
   return(data)
 }

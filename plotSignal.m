@@ -13,8 +13,8 @@ for i = 1 : numel(cell_indecies)
     trace = dF(cell_indecies(i),:);
     plot(timestamps, trace /2 + yshift);
     
-    text(-30, yshift + 1, ...
-        num2str(cell_indecies(i)));
+    %text(-30, yshift + 1, ...
+    %    num2str(cell_indecies(i)));
     
     plot(event_timestamps, repmat(yshift+1, numel(event_timestamps), 1), 'r*',...
         'MarkerSize',3);

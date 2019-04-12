@@ -1,5 +1,6 @@
 library(cluster)
 library(factoextra)
+library(viridis)
 library(tidyr)
 
 get.cor = function(data, cond=NA) {
@@ -74,7 +75,7 @@ plot.cluster.traces = function(data) {
 }
 
 plot.activity.raster = function(data) {
- cluster.data = data %>%
+  cluster.data = data %>%
     group_by(exp, cluster) %>%
     dplyr::summarise(order.max = max(cluster_order))
  
@@ -88,6 +89,8 @@ plot.activity.raster = function(data) {
     gtheme +
     labs(fill='zscored dF/F') +
     theme(legend.position = 'top') +
+    #scale_fill_gradient(low='yellow', high='red') +
+    scale_fill_viridis() +
     #      axis.text.y=element_blank(),
     #      axis.ticks.y=element_blank()) +
     ylab('Cell') +

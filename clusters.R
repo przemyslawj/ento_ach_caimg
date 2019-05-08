@@ -1,59 +1,35 @@
 library(cluster)
+library(dplyr)
 library(factoextra)
 library(viridis)
 library(tidyr)
-
-get.cor = function(data, cond=NA) {
-  if (!is.na(cond)) {
-    data = filter(data, exp == cond)
-  }
-  
-  max.frame = max(data$frame)
-  trace.data.df = data %>%
-    mutate(tot_frame = (as.numeric(exp) - 1) * max.frame + frame) %>%
-    select(cell_id, tot_frame, ztrace) %>%
-    dplyr::rename(frame=tot_frame)
-  df = spread(trace.data.df, cell_id, ztrace) 
-  cor.data = cor(df[,2:ncol(df)])
-  cor.data[is.na(cor.data)] = 0
-  return(cor.data)
-}
+library(tibble)
 
 add.cluster2 = function(data, clust.res) {
+  max.cluster.index = which.max(clust.res$silinfo$clus.avg.widths)
+  swidths = clust.res$silinfo$widths %>%
+    rownames_to_column('cell_id') %>%
+    mutate(my.clust = if_else(cluster==max.cluster.index, 1, 2)) %>%
+    arrange(my.clust, desc(sil_width)) %>%
+    mutate(row.id = row_number(my.clust)) %>%
+    mutate(clust.order_value = ifelse(my.clust == 1, row.id, max(row.id) + max(row.id)-row.id)) %>%
+    arrange(clust.order_value) %>%
+    mutate(cluster_order = row_number(clust.order_value)) %>%
+    select(-c('neighbor','sil_width', 'row.id', 'cluster', 'clust.order_value')) %>%
+    dplyr::rename(cluster=my.clust)
+  
   clust.order = 1:length(clust.res$cluster)
-  names(clust.order) = rownames(clust.res$silinfo$widths)
+  names(clust.order) = swidths$cell_id
+  
   data.ordered = data %>%
-    mutate(cluster=clust.res$cluster[as.character(cell_id)],
-           cluster_order=clust.order[as.character(cell_id)])
+    left_join(swidths, by=c('cell_id'='cell_id'))  %>%
+    arrange(cluster_order)
   data.ordered$cluster = as.factor(data.ordered$cluster)
   
   data.ordered$cell_id = factor(data.ordered$cell_id, levels = names(sort(clust.order)))
   
   return(data.ordered)
   
-}
-
-add.cluster = function(data, cond=NA, plot.silhouette=FALSE, k=2) {
-  cor.data = get.cor(data, cond)
-  dissim.dist = as.dist(1 - cor.data)
-  kclust = kmeans(dissim.dist, k, iter.max=20)
-  sh = silhouette(kclust$cluster, dissim.dist)
-  if (plot.silhouette) {
-    plot(sh)
-  }
-  sh.sorted = sortSilhouette(sh)
-  clust.order = 1:length(kclust$cluster)
-  names(clust.order) = names(kclust$cluster)[attr(sh.sorted,'iOrd')]
-
-  data.ordered = data %>%
-    mutate(cluster=kclust$cluster[as.character(cell_id)],
-           cluster_order=clust.order[as.character(cell_id)])
-  data.ordered$cluster = as.factor(data.ordered$cluster)
-  #data.ordered$cluster_order = as.factor(data.ordered$cluster_order)
-  
-  data.ordered$cell_id = factor(data.ordered$cell_id, levels = names(sort(clust.order)))
-  
-  return(data.ordered)
 }
 
 plot.cluster.traces = function(data) {
@@ -74,25 +50,22 @@ plot.cluster.traces = function(data) {
     theme(legend.position='none')
 }
 
-plot.activity.raster = function(data) {
+plot.activity.raster = function(data, bin.width) {
   cluster.data = data %>%
     group_by(exp, cluster) %>%
     dplyr::summarise(order.max = max(cluster_order))
  
   data %>%
     mutate(maxed.ztrace=pmax(-2,pmin(6,ztrace))) %>%
-    #filter(exp=='Ach') %>%
     ggplot(aes(x=frame / frame.rate.hz, y=cluster_order)) +
-    geom_raster(aes(fill=maxed.ztrace), interpolate = FALSE)  +
+    geom_tile(aes(fill=maxed.ztrace), interpolate = FALSE, width=bin.width)  +
     geom_hline(data=cluster.data, mapping=aes(yintercept=order.max+0.5), color='red')+
     facet_grid(. ~ exp) +
     gtheme +
     labs(fill='zscored dF/F') +
     theme(legend.position = 'top') +
-    #scale_fill_gradient(low='yellow', high='red') +
+    #scale_y_reverse() +
     scale_fill_viridis() +
-    #      axis.text.y=element_blank(),
-    #      axis.ticks.y=element_blank()) +
     ylab('Cell') +
     xlab('Time (sec)')
 }

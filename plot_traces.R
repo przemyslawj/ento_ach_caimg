@@ -19,4 +19,6 @@ dat %>%
   ylab('dF/F') +
   xlim(c(0,400))
 
-ggsave('/tmp/trace.svg',)
+ggsave('/tmp/trace.svg', units='cm',
+       width=20,
+       height=10)

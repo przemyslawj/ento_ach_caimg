@@ -55,6 +55,7 @@ end
 
 
 M=rescale(M, 0.11, 0.7);
+% Gray movie in RGB
 I = cat(3, M, M, M);
 
 % Add lambdas in magenta

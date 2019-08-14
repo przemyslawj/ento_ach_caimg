@@ -5,6 +5,23 @@ library(viridis)
 library(tidyr)
 library(tibble)
 
+add.cluster.tsne = function(data) {
+  cor.data = get.cor(data, cond='ACh')
+  tsne.vals = tsne::tsne(cor.data, k=1)
+  cell_ids = unique(data$cell_id)
+  tsne.df = data.frame(cell_id=cell_ids, tsne.val=tsne.vals) %>%
+    arrange(tsne.val) %>%
+    mutate(cluster_order = row_number())
+  
+  data = data %>% 
+    left_join(tsne.df, by='cell_id') %>%
+    mutate(clust.order_value = tsne.val,
+           cluster=1) %>%
+    arrange(cluster_order) 
+  
+  return(data)
+}
+
 add.cluster2 = function(data, clust.res) {
   max.cluster.index = which.max(clust.res$silinfo$clus.avg.widths)
   swidths = clust.res$silinfo$widths %>%
@@ -35,14 +52,14 @@ add.cluster2 = function(data, clust.res) {
 plot.cluster.traces = function(data) {
   cluster.data = data %>%
     group_by(date, animal, exp, cluster,frame) %>%
-    dplyr::summarise(m.trace = median(ztrace))
+    dplyr::summarise(m.trace = median(ztrace), frame.rate = frame.rate[1])
   summary.data = data %>%
     group_by(date, animal, exp, frame) %>%
-    dplyr::summarise(m.trace = median(ztrace))
+    dplyr::summarise(m.trace = median(ztrace), frame.rate = frame.rate[1])
   
   ggplot() +
-    geom_line(data=cluster.data, aes(x=frame/frame.rate.hz , y=m.trace, color=cluster), alpha=0.7)  +
-    geom_line(data=summary.data, aes(x=frame/frame.rate.hz , y=m.trace), color='black', alpha=0.7)  +
+    geom_line(data=cluster.data, aes(x=frame/frame.rate , y=m.trace, color=cluster), alpha=0.7)  +
+    geom_line(data=summary.data, aes(x=frame/frame.rate , y=m.trace), color='black', alpha=0.7)  +
     facet_grid(exp ~ .) +
     gtheme +
     xlab('Time (sec)') +
@@ -57,9 +74,9 @@ plot.activity.raster = function(data, bin.width) {
  
   data %>%
     mutate(maxed.ztrace=pmax(-2,pmin(6,ztrace))) %>%
-    ggplot(aes(x=frame / frame.rate.hz, y=cluster_order)) +
+    ggplot(aes(x=frame / frame.rate, y=cluster_order)) +
     geom_tile(aes(fill=maxed.ztrace), interpolate = FALSE, width=bin.width)  +
-    geom_hline(data=cluster.data, mapping=aes(yintercept=order.max+0.5), color='red')+
+    #geom_hline(data=cluster.data, mapping=aes(yintercept=order.max+0.5), color='red')+
     facet_grid(. ~ exp) +
     gtheme +
     labs(fill='zscored dF/F') +

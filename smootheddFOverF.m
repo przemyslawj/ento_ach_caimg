@@ -5,7 +5,7 @@ function [ dF, Fbase ] = smootheddFOverF(F)
 
 dF = zeros(size(F));
 for i = 1:size(F,1)
-    Fbase = smooth(F(i,:), 0.05, 'lowess')';
+    Fbase = smooth(F(i,:), 0.1, 'lowess')';
     dF(i,:) = (F(i,:) - Fbase) ./ Fbase;
 end
 

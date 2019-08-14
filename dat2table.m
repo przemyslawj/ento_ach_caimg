@@ -1,7 +1,9 @@
-function [result_table] = dat2table(dat)
+function [result_table, result_events] = dat2table(dat)
 
+manuallyAdjust = true;
 cell_indecies = find([dat.stat.iscell] > 0);
 result_table = table();
+result_events = table();
 exp_names = {'Baseline', 'Ach', 'Atropine'};
 for exp = 1:size(dat.Fcell, 2)
     F = dat.Fcell{1,exp};
@@ -21,26 +23,25 @@ for exp = 1:size(dat.Fcell, 2)
         arrayfun(@(x) ['STrace_' num2str(x)], (cell_indecies)', 'UniformOutput', false);
     
     %% Detect events and create table
-    stds = std((F1 - F0) ./ F0, [], 2);
-    [eventsVec, ~] = findEvents(dF(cell_indecies,:)', stds(cell_indecies), 4, 3);
+    freq = get_frame_rate(dat.ops.mouse_name);
+    [eventsVec, ~, ~, thresholds] = findEvents(dF(cell_indecies,:)', 4, freq);
     events_table = array2table(eventsVec);
     events_table.Properties.VariableNames = ...
         arrayfun(@(x) ['Event_' num2str(x)], (cell_indecies)', 'UniformOutput', false);
     
     figName = [dat.ops.mouse_name '_' exp_names{exp}];
-    figure('Name', ['dF_', figName]);
-    plotSignal(dF, eventsVec, cell_indecies);
+    h1 = figure('Name', ['dF_', figName]);
+    plotSignal(dF(cell_indecies,:), eventsVec, thresholds, freq);
     printPng(['figs' filesep 'dF' filesep figName '.png']);
     saveas(gcf, ['figs' filesep 'dF' filesep 'fig' filesep figName '.fig']);
     
-    stds = std(smootheddF, [], 2);
-    [eventsVec, ~] = findEvents(smootheddF(cell_indecies,:)', stds(cell_indecies), 4, 3);
+    [eventsVec, event_table, ~, thresholds] = findEvents(smootheddF(cell_indecies,:)', 1, freq, manuallyAdjust);
     sevents_table = array2table(eventsVec);
     sevents_table.Properties.VariableNames = ...
         arrayfun(@(x) ['SEvent_' num2str(x)], (cell_indecies)', 'UniformOutput', false);
     
-    figure('Name', ['smoothed_', figName]);
-    plotSignal(smootheddF, eventsVec, cell_indecies);
+    h2 = figure('Name', ['smoothed_', figName]);
+    plotSignal(smootheddF(cell_indecies,:), eventsVec, thresholds, freq);
     printPng(['figs' filesep 'smoothed' filesep figName '.png']);
     saveas(gcf, ['figs' filesep 'smoothed' filesep 'fig' filesep figName '.fig']);
     
@@ -58,6 +59,15 @@ for exp = 1:size(dat.Fcell, 2)
     else
         result_table = [result_table; exp_table];
     end
+    
+    nevents = size(event_table, 1);
+    event_table.date = repmat({dat.ops.date}, nevents,1);
+    event_table.animal = repmat({dat.ops.mouse_name}, nevents, 1);
+    event_table.exp = repmat(exp_names(exp), nevents, 1);
+    
+    result_events = [result_events; event_table];
+    %close(h1);
+    %close(h2);
 end
 
 end

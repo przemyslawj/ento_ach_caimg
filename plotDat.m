@@ -1,20 +1,24 @@
 figure;
 
 exp_id = 1;
+freq = 3;
 
 cell_indecies = find([dat.stat.iscell] > 0);
-%cell_indecies = cell_indecies(40:60);
+F1 = dat.Fcell{1,1};
+F1 = F1(cell_indecies, :);
 
-F0 = mean(dat.Fcell{1,1}, 2);
+F0 = mean(F1, 2);
 F = dat.Fcell{1,exp_id};
-%dF=smootheddFOverF(F);
-dF = (F - F0) ./ F0;
+F = F(cell_indecies, :);
 
-stds = std(dF, [], 2);
-[eventsVec, ~] = findEvents(dF(cell_indecies, :)', stds(cell_indecies), 4, 3);
+dF = smootheddFOverF(F);
+%dF = (F - F0) ./ F0;
+
+std_thr = 4;
+[eventsVec, event_times, zscores, thresholds] = findEvents(dF', std_thr, freq, false);
 
 
-plotSignal(dF, eventsVec, cell_indecies);
+plotSignal(dF, eventsVec, thresholds, freq);
 r=150;
 set(gcf, 'PaperUnits', 'inches', 'PaperPosition', [0 0 5000 3000]/r);
 print(gcf,'-dpng',sprintf('-r%d',r), 'bar.png');

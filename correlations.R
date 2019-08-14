@@ -19,6 +19,9 @@ get.cor = function(data, cond=NA) {
   
   cor.data = cor(df[,2:ncol(df)])
   cor.data[is.na(cor.data)] = 0
+  for (i in 1:nrow(cor.data)) {
+    cor.data[i,i] = 1.0
+  }
   return(cor.data)
 }
 
@@ -74,20 +77,53 @@ get.corr.change = function(data) {
   X[2] - X[1]   
 }
 
-plot.shuffled.cors = function(data, cond) {
+get.corr.vals = function(M) {
+  df = melt(M)
+  (filter(df, Var1 != Var2))$value 
+}
+
+get.shuffled.cors = function(data, cond) {
   d = filter(data, exp==cond)
-  cor.data = get.cor(d)
-  cor.df.org = create.cor.values.df(cor.data, 0)
+  nshuffles = 100
+  shuffled.df = create.shuffles(d, nshuffles = nshuffles)
+  return(shuffled.df)
+}
+
+signif.shuffled.cors = function(shuffled.df, cors.df) {
   
-  hist.df = create.shuffles(d)
+  run.ks.test = function(i) {
+    ks.test.res = ks.test(cors.df$vals, subset(shuffled.df, shuffle_i == i)$vals)
+    ks.test.res$p.value
+  }
+  pvals = sapply(unique(shuffled.df$shuffle_i), run.ks.test)
+  pvals.adjusted = p.adjust(pvals, method = 'bonferroni')
+  
+  return(pvals.adjusted)
+}
+
+get.cors.df = function(data, cond) {
+  d = filter(data, exp==cond)
+  x = get.cor(d) 
+  create.cor.values.df(x, 1)
+}
+
+plot.shuffled.cors = function(shuffled.df, cors.df) {
+  library(grid)
+  pvals = signif.shuffled.cors(shuffled.df, cors.df)
+  
+  pvaltext = sprintf('max p-val = %.2f',max(pvals))
+  grob <- grobTree(textGrob(pvaltext, x=0.1,  y=0.5, hjust=0,
+                   gp=gpar(col="red", fontsize=10, fontface="italic")))
   
   ggplot() + 
-    geom_density(data=hist.df, aes(x=vals, y=..scaled.., group=shuffle_i), alpha=0.6) +
-    geom_density(data=cor.df.org, mapping=aes(x=vals, y=..scaled.., group=shuffle_i),colour='red') +
-    #stat_bin(aes(x=vals, group=shuffle_i), hist.df, geom='line', alpha=0.5, binwidth=0.05) +
-    #stat_bin(aes(x=vals), cor.df.org, colour='red', geom='line', binwidth=0.05) +
-    xlim(c(-0.2, 1.0)) +
-    xlab('Correlation') + ylab('Density')
+    stat_ecdf(data=shuffled.df, aes(x=vals, group=shuffle_i), geom='step', alpha=0.6) +
+    stat_ecdf(data=cors.df, mapping=aes(x=vals), colour='red', geom='step') +
+    #geom_density(data=shuffled.df, aes(x=vals, group=shuffle_i), alpha=0.6, bw='SJ') +
+    #geom_density(data=cors.df, mapping=aes(x=vals),colour='red', bw='SJ') +
+    annotation_custom(grob) +
+    xlim(c(-1.0, 1.0)) +
+    xlab('Correlation') + ylab('Probability')
 }
+
 
 

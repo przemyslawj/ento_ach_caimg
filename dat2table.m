@@ -1,6 +1,6 @@
 function [result_table, result_events] = dat2table(dat)
 
-manuallyAdjust = true;
+manuallyAdjust = false;
 cell_indecies = find([dat.stat.iscell] > 0);
 result_table = table();
 result_events = table();
@@ -24,7 +24,7 @@ for exp = 1:size(dat.Fcell, 2)
     
     %% Detect events and create table
     freq = get_frame_rate(dat.ops.mouse_name);
-    [eventsVec, ~, ~, thresholds] = findEvents(dF(cell_indecies,:)', 4, freq);
+    [eventsVec, ~, ~, thresholds] = findEvents(dF(cell_indecies,:)', 5, freq);
     events_table = array2table(eventsVec);
     events_table.Properties.VariableNames = ...
         arrayfun(@(x) ['Event_' num2str(x)], (cell_indecies)', 'UniformOutput', false);
@@ -33,9 +33,8 @@ for exp = 1:size(dat.Fcell, 2)
     h1 = figure('Name', ['dF_', figName]);
     plotSignal(dF(cell_indecies,:), eventsVec, thresholds, freq);
     printPng(['figs' filesep 'dF' filesep figName '.png']);
-    saveas(gcf, ['figs' filesep 'dF' filesep 'fig' filesep figName '.fig']);
     
-    [eventsVec, event_table, ~, thresholds] = findEvents(smootheddF(cell_indecies,:)', 1, freq, manuallyAdjust);
+    [eventsVec, event_table, ~, thresholds] = findEvents(smootheddF(cell_indecies,:)', 5, freq, manuallyAdjust);
     sevents_table = array2table(eventsVec);
     sevents_table.Properties.VariableNames = ...
         arrayfun(@(x) ['SEvent_' num2str(x)], (cell_indecies)', 'UniformOutput', false);
@@ -43,7 +42,6 @@ for exp = 1:size(dat.Fcell, 2)
     h2 = figure('Name', ['smoothed_', figName]);
     plotSignal(smootheddF(cell_indecies,:), eventsVec, thresholds, freq);
     printPng(['figs' filesep 'smoothed' filesep figName '.png']);
-    saveas(gcf, ['figs' filesep 'smoothed' filesep 'fig' filesep figName '.fig']);
     
     %% Create table cointaining joined results
     exp_table = [trace_table smoothed_trace_table events_table sevents_table];

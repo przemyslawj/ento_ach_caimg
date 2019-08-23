@@ -10,19 +10,44 @@ library(plyr)
 library(readr)
 library(stringr)
 library(DT)
+library(pracma)
+library(reshape2)
+library(tidyr)
 
 library(ggplot2)
 library(cowplot)
-gtheme = theme_minimal() + theme_cowplot() + 
-  theme(text = element_text(size=18), axis.text = element_text(size=15))
+library(grid)
 library(viridis)
+
+px2pt = 1/(ggplot2::.pt*72.27/96)
+gtheme = theme_minimal() + theme_cowplot() + 
+  theme(text = element_text(size=8, family = 'Arial'), 
+        panel.background = element_rect(fill = 'white'),
+        line = element_line(size = px2pt),
+        title = element_text(size=8),
+        plot.title = element_text(size=8, hjust=0.5, face='plain'),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=8),
+        legend.box.margin = margin(2,2,2,2),
+        legend.box.spacing = unit(0, 'mm'),
+        axis.line.x = element_line(size = 0.8 * px2pt, linetype = "solid", colour = "black"),
+        axis.line.y = element_line(size = 0.8 * px2pt, linetype = "solid", colour = "black"),
+        axis.text.x=element_text(size=8, colour = "black"),
+        axis.text.y=element_text(size=8, colour = "black"),
+        axis.title.x = element_text(size=8),
+        axis.title.y = element_text(size=8))
+gtheme.label_size = 10
+
+width_1col = 8.5 
+width_15col = 11.6
+width_2col = 17.6
 
 sem = function(x) sqrt( var(x, na.rm=TRUE) / length(x))
 ```
 
 ```{r}
 source('data_import.R')
-rootdata_dir = '/mnt/DATA/Audrey/ca_img_result/data_manual_threshold/'
+rootdata_dir = '/mnt/DATA/Audrey/ca_img_result/data_threshold_5/'
 gen_imgs_dir = '/home/prez/Dropbox/phd/ach_paper/caimg_analysis/figures_generated/'
 
 dat_files = list.files(rootdata_dir, pattern='dat.*.csv', full.names=TRUE)
@@ -61,9 +86,12 @@ events.data$exp = as.factor(events.data$exp)
 events.data$exp = revalue(events.data$exp, c('Ach'='ACh', 'Atropine'='Atr', 'Baseline'='Ctrl'))
 ```
 
+Are events in Thy1 and NECAB similar?
+- event rates
+- event durations
+
 
 ```{r}
-library(plyr)
 
 cell.event.summary = all.data %>%
   group_by(animal, date, cell_id, exp) %>%
@@ -119,10 +147,6 @@ cell.event.summary %>%
 ```
 
 
-```{r}
-#selected.animals = c('Necab_M13', 'Necab_M11', 'Necab_M8', 'Necab_M3', 'Necab_M4')
-```
-
 Number of cells in the selected slices
 ```{r}
 ncells.df = all.data %>%
@@ -152,16 +176,6 @@ all.data %>%
   dplyr::summarise(ncells=n(), nactive=sum(isactive), 'Active %'=round(nactive/ncells*100))
 ```
 
-
-Number of active cells with events depending on condition
-```{r}
-recording.summary %>%
-  #filter(animal %in% selected.animals) %>%
-  ggplot(aes(x=exp, y=nactive)) +
-  geom_point(aes(colour=exp), size=3) +
-  geom_line(aes(group=animal), size=0.2) +
-  xlab('') + ylab('# Active cells') + gtheme
-```
 
 
 
@@ -210,7 +224,9 @@ filtered.events.data = events.data %>%
 
 # Event analysis
 ```{r}
+# TODO: adjust the threshold?
 filtered.events.data = mutate(filtered.events.data, dur = End_sec - Start_sec) %>%
+  filter(peak_zscore > 4) %>%
   mutate(exp_cell = paste0(animal, exp, cell_id, sep='_')) %>%
   mutate(animal_exp = paste0(animal, exp, sep='_')) 
 #events.data$cell_id = as.factor(events.data$cell_id)
@@ -225,6 +241,19 @@ filter(event.freq.df) %>%
   xlab(bquote('Event freq ('*~min^-1*')')) +
   ylab('Probability')
 ```
+
+No difference between Thy1 and Necab animals
+```{r}
+event.freq.line = filter(event.freq.df, exp=='Ctrl') %>%
+  dplyr::mutate(animal_line = ifelse(startsWith(as.character(animal), 'Necab'), 'Necab', 'Thy1'))
+event.freq.line$animal_line = as.factor(event.freq.line$animal_line)
+event.freq.line %>%
+  group_by(animal, animal_line) %>%
+  dplyr::summarise(med.freq = median(event_freq)) -> summary.event.freq.df
+hist(subset(summary.event.freq.df, animal_line == 'Necab')$med.freq)
+wilcox.test(med.freq ~ animal_line, summary.event.freq.df)
+```
+
 
 Change in event freq (ACh - Ctrl)
 Event freq changes of cells on the level of network
@@ -271,7 +300,7 @@ filter(filtered.events.data) %>%
 Duration change ACh - Ctrl
 ```{r}
 event.dur.df = group_by(filtered.events.data, animal, cell_id, exp, exp_cell, animal_exp) %>%
-  dplyr::summarise(dur.mean = mean(dur), nevents = n()) %>%
+  dplyr::summarise(dur.mean = mean(dur), dur.med = median(dur), nevents = n()) %>%
   #filter(nevents > 4)
   filter(nevents > 0)
 
@@ -292,9 +321,9 @@ g.event.dur = filter(event.dur.diff) %>%
   xlim(c(-1,10))
 g.event.dur
 
-g.events = plot_grid(g.event.freq, g.event.dur, ncol = 2,
-                     labels = c('A', 'B'), label_size = 28)
-ggsave(paste0(gen_imgs_dir, 'events.png'), width=21, height=8, units='cm')
+g.events = plot_grid(g.event.freq, g.event.dur, ncol=2,
+                     labels = c('A', 'B'), label_size = gtheme.label_size)
+ggsave(paste0(gen_imgs_dir, 'S3-events.png'), width=width_1col, height=4.5, units='cm')
   
 ```
 Median event dur increase
@@ -308,6 +337,16 @@ sem(median.durdiff$mdur.mean.diff)
 wilcox.test(median.durdiff$mdur.mean.x, median.durdiff$mdur.mean.y, paired=TRUE)
 ```
 
+No difference between Necab and Thy1 animals in mean event duration
+```{r}
+event.dur.line = event.dur.df %>%
+  dplyr::mutate(animal_line = ifelse(startsWith(as.character(animal), 'Necab'), 'Necab', 'Thy1'))
+event.dur.line$animal_line = as.factor(event.dur.line$animal_line)
+group_by(event.dur.line, animal, animal_line) %>%
+  dplyr::summarise(med.event.dur=median(dur.mean)) -> summary.event.dur.line
+shapiro.test(subset(summary.event.dur.line, animal_line =='Necab')$med.event.dur)
+wilcox.test(med.event.dur ~ animal_line, summary.event.dur.line)
+```
 
 
 
@@ -335,17 +374,6 @@ g.trace = data %>%
 g.trace
 ```
 
-Distribution of trace values
-```{r}
-cell.data = filter(filtered.all.data, animal=='Necab_M11') %>%
-  mutate(exp_cell = paste(animal, exp, cell_id, sep='_'))
-
-cell.data$exp_cell = as.factor(cell.data$exp_cell)
-cell.data %>%
-  ggplot() +
-  stat_ecdf(aes(x=strace, color=exp, group=exp_cell))
-```
-
 
 
 Make activity raster
@@ -359,7 +387,14 @@ make.activity.raster = function(data) {
   res.kmeans = eclust(cor.data, FUNcluster = "kmeans", hc_metric = "pearson", k=2, graph=FALSE)
   clust.data = add.cluster2(data, res.kmeans)
   g.activity.raster = plot.activity.raster(clust.data, bin.width) +
-      xlim(c(0,400)) 
+      xlim(c(0,400)) +
+      theme(strip.background = element_blank(),
+            legend.position = 'right',
+            legend.text = element_text(size = 8),
+            legend.key.height = unit(2, 'mm'),
+            legend.box.margin = margin(0,0,0,0),
+            legend.box.spacing = unit(0, 'mm')) +
+      labs(fill='z-scored\nΔF/F') 
   g.activity.raster
 }
 
@@ -379,15 +414,29 @@ g.activity.raster
 
 
 
-Draw similarity matrix
+Draw correlation matrix
 ```{r}
-plot.cor = function(cor.data, res.kmeans, limits=c(-1.0, 1.0), legend.position='top') {
+
+breaks.mid3 = function(breaks) {
+  n  = length(breaks)
+  breaks_idx = seq(10, round(n/10) * 10, 10 * round((n-1)/10 / 3))
+  breaks[breaks_idx]
+}
+
+labels.stip = function(breaks) {
+  str_replace(breaks, '-', '')
+}
+
+plot.cor = function(cor.data, res.kmeans, limits=c(-1.0, 1.0), legend.position='top', include.yaxis=FALSE) {
   sim.dist = as.dist(cor.data)
+  
   #silhouette.ordered = silhouette(res.kmeans$cluster, dissim.dist) %>% sortSilhouette()
   #sim.dist.ordered = as.matrix(sim.dist)[attr(silhouette.ordered, 'iOrd'), attr(silhouette.ordered, 'iOrd')]
   sim.dist.ordered=as.matrix(sim.dist) 
+  rownames(sim.dist.ordered) = 1:nrow(sim.dist.ordered)
+  colnames(sim.dist.ordered) = 1:ncol(sim.dist.ordered)
   
-  fviz_dist(as.dist(sim.dist.ordered), 
+  g = fviz_dist(as.dist(sim.dist.ordered), 
             lab_size = 8, 
             order = FALSE) + 
     #scale_fill_viridis(limits=c(-1.0, 1.0), breaks=c(-1.0, 0.0, 1.0), minor_breaks=c(-1.0, -0.5,0.0,0.5,1.0)) +
@@ -395,12 +444,23 @@ plot.cor = function(cor.data, res.kmeans, limits=c(-1.0, 1.0), legend.position='
       limits=limits, breaks=c(-1.0, 0.0, 1.0), minor_breaks=c(-1.0, -0.5,0.0,0.5,1.0)) +
     gtheme +
     theme(legend.position = legend.position,
-          axis.line = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank(),
-          plot.title = element_text(face='plain', hjust=1, vjust=0)) +
-    xlab('') + ylab('') +
-    labs(fill='Correlation')
+          legend.key.height = unit(2, 'mm'),
+          axis.line = element_blank()) +
+    xlab('Cell') +
+    scale_x_discrete(breaks=breaks.mid3, labels=labels.stip) + 
+    labs(fill='')
+  
+  if (!include.yaxis) {
+    g = g + theme(
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank()) +
+          ylab('') 
+  } else {
+    g = g + ylab('Cell') +
+      scale_y_discrete(breaks=breaks.mid3, labels=labels.stip)
+  }
+  
+  return(g)
 }
 
 get.cor.data = function(data, cond, res.kmeans.all) {
@@ -411,13 +471,13 @@ get.cor.data = function(data, cond, res.kmeans.all) {
   get.cor(exp.data)
 }
 
-plot.cor.dist = function(cor.data, cond, res.kmeans.all, legend.position='top') {
-  plot.cor(cor.data, res.kmeans.all[[cond]], legend.position=legend.position)
+plot.cor.dist = function(cor.data, cond, res.kmeans.all, legend.position='top', include.yaxis=FALSE) {
+  plot.cor(cor.data, res.kmeans.all[[cond]], legend.position=legend.position, include.yaxis=include.yaxis)
 }
 
 res.kmeans.all = assign.clusters(data)
 get.cor.data(data, 'ACh', res.kmeans.all) %>% 
-  plot.cor.dist('ACh', res.kmeans.all) 
+  plot.cor.dist('ACh', res.kmeans.all, include.yaxis=TRUE) 
 ```
 Change in correlation of pairs of neurons
 ```{r}
@@ -629,6 +689,7 @@ plot.cluster.assignments = function(silwidths) {
           axis.text.y = element_blank(), 
           axis.line = element_blank(),
           axis.ticks.x = element_blank(),
+          line = element_line(size = px2pt * 0.5),
           legend.position = 'none')
 }
 
@@ -689,7 +750,6 @@ g.autocorr
 
 Bin data
 ```{r}
-library(pracma)
 bin.dur.sec = 1
 all.data.binned.tmp = filtered.all.data %>%
   mutate(bin = ceil(frame / (bin.dur.sec * frame.rate))) 
@@ -786,9 +846,10 @@ plot.pop.events = function(animal_name) {
   geom_point(data=animal.peaks,
              aes(x=bin*bin.dur.sec, y=ztrace.mean + 0.5), shape=8, colour='red') +
   facet_grid(. ~ exp) +
-  xlab('Time (sec)') + ylab('zscored dF/F') +
+  xlab('Time (sec)') + ylab('z-scored ΔF/F') +
   xlim(c(0,400)) +
-  gtheme
+  gtheme +
+  theme(line = element_line(size=0.5*px2pt))
 }
 
 animal_file = 'Necab_M11'
@@ -815,16 +876,6 @@ pop.events.signal %>%
                    peak.zscore=mean(ztrace.mean)%>% round(2)) ->
   pop.active.df
 
-#pop.event.ztrace.min = 0.3
-#pop.events.signal %>%
-#  group_by(animal, exp, bin) %>% 
-#  dplyr::summarise(ncells=n(), 
-#                   nactive=sum(has.event),
-#                   #nactive2=sum(ztrace.max > (ztrace + 1.0 * ztrace.mean.sd))) ->
-#                   nactive2=sum(ztrace > pop.event.ztrace.min)),
-#                   event.dur=mean(peak.dur)) ->
-#  pop.active.df
-
 DT::datatable(pop.active.df)
 ```
 
@@ -847,7 +898,31 @@ DT::datatable(pop.active.summary)
 # Signif tests
 shapiro.test(subset(pop.active.summary, exp=='Ctrl')$events.dur)
 shapiro.test(subset(pop.active.summary, exp=='ACh')$events.dur)
-t.test(events.dur ~ exp, subset(pop.active.summary,exp != 'Atr'), paired=TRUE)
+t.test(events.dur ~ exp, subset(pop.active.summary, exp != 'Atr'), paired=TRUE)
+
+g.pop.event.dur = filter(pop.active.summary, exp != 'Atr') %>%
+  ggplot() +
+  geom_line(aes(x=exp, y=events.dur, group=animal)) +
+  gtheme +
+  xlab('') +
+  ylab('Duration (s)')
+
+g.pop.event.freq = filter(pop.active.summary, exp != 'Atr') %>%
+  ggplot() +
+  geom_line(aes(x=exp, y=events.freq, group=animal)) +
+  gtheme +
+  xlab('') +
+  ylab('Frequency (min-1)')
+
+g.pop.event.stats = plot_grid(grob(),
+                              g.pop.event.dur, 
+                              grob(),
+                              grob(),
+                              g.pop.event.freq, 
+                              grob(),
+                              ncol=6, 
+                              rel_widths = c(1,3,1,1,3,1),
+                              labels=c('C', '', '','D', '',''), label_size=gtheme.label_size)
 
 shapiro.test(subset(pop.active.summary, exp=='Ctrl')$events.freq)
 shapiro.test(subset(pop.active.summary, exp=='ACh')$events.freq)
@@ -864,12 +939,15 @@ has.pop.event = unique(has.pop.event$animal)
 pop.active.df %>%
   filter(animal %in% has.pop.event) %>%
   mutate(animal_exp = paste(animal, exp, sep='_')) %>%
-  ggplot(aes(x=nactive2/ncells, stat(count), fill=exp)) +
-  geom_density( alpha=0.1) +
+  ggplot(aes(x=nactive2/ncells, stat(count), color=exp)) +
+  geom_density(alpha=1.0) +
   facet_grid(. ~ animal, scales='free') +
+  theme(legend.position = 'top',
+        axis.text.x = element_text(angle = 90, hjust = 1)) +
   coord_flip() +
   xlim(c(0,1.0)) +
   #gtheme +
+  labs(color='') +
   ylab('# Events') +
   xlab('Participating cells fraction')
 ggsave(paste0(gen_imgs_dir, 'pop_events_participation_dist.png'),
@@ -898,7 +976,7 @@ pop.active.summary %>%
   xlab('') + ylab('Neurons participating\n in population events (%)') +
   #theme(legend.position = 'none')+
   ylim(c(50,100)) 
-ggsave(paste0(gen_imgs_dir, 'pop_events_participation.png'),
+ggsave(paste0(gen_imgs_dir, 'S5-pop_events_participation.png'),
        units = 'cm',
        width = 7, height = 9)
 ```
@@ -958,20 +1036,23 @@ group_by(cell.events.df, animal, exp) %>%
 
 
 cell.events.df %>%
+  filter(exp != 'Atr') %>%
   mutate(animal_exp = paste(animal, exp, sep='_')) %>%
-  ggplot(aes(x=during.event.pct, stat(density), fill=exp)) +
-  geom_density( alpha=0.1) +
-  facet_grid(. ~ animal, scales='free') +
-  coord_flip() +
-  xlim(c(0,100.0)) +
-  #gtheme +
-  theme(axis.text.x = element_text(angle = -90, hjust = 1)) +
-  ylab('Density') +
+  ggplot(aes(x=during.event.pct, color=exp)) +
+  stat_ecdf(geom='step') +
+  facet_grid(animal ~ .) +
+  xlim(c(0, 100.0)) +
+  scale_y_continuous(breaks=c(0, 0.5, 1.0), limits=c(0, 1.0)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position='top') +
+  labs(color='') +
+  ylab('Probability') +
   xlab('Calcium events\nduring population event (%)') 
   
-ggsave(paste0(gen_imgs_dir, 'ca_events_during_pop_events.\nng'),
+ggsave(paste0(gen_imgs_dir, 'removed_S4-ca_events_during_pop_events.png'),
        units = 'cm',
-       width = 32, height = 9)
+       width = width_1col, height = 22)
 ```
 
 
@@ -1014,12 +1095,10 @@ data.summary = create.cell.summary(filtered.all.data)
 
 
 ```{r}
-library(reshape2)
-
 calc.2cor.similarity = function(cor.ctrl, cor.ach, cor.atr, animal_id) {
-  sim.cor1 = (cor.ctrl- cor.ach) %>% melt %>% mutate(comparison='Ctrl - ACh')
-  sim.cor2 = (cor.ctrl- cor.atr) %>% melt %>% mutate(comparison='Ctrl - Atr')
-  sim.cor3 = (cor.ach- cor.atr) %>% melt %>% mutate(comparison='ACh - Atr')
+  sim.cor1 = (cor.ach - cor.ctrl) %>% melt %>% mutate(comparison='ACh - Ctrl')
+  sim.cor2 = (cor.ctrl - cor.atr) %>% melt %>% mutate(comparison='Ctrl - Atr')
+  sim.cor3 = (cor.ach - cor.atr) %>% melt %>% mutate(comparison='ACh - Atr')
   
   bind_rows(sim.cor1, sim.cor2, sim.cor3) %>%
     mutate(animal=animal_id) %>%
@@ -1029,13 +1108,13 @@ calc.2cor.similarity = function(cor.ctrl, cor.ach, cor.atr, animal_id) {
 plot.2cor.similarity = function(df) {
   ggplot(df) +
     #geom_histogram(aes(value, fill=comparison), alpha=0.2, position='identity') +
-    geom_density(aes(value, fill=comparison), alpha=0.2) +
+    geom_density(aes(value, color=comparison), alpha=0.2) +
     gtheme +
-    geom_vline(xintercept = 0, linetype='dashed', color='red') +
+    geom_vline(xintercept = 0, linetype='dashed', color='black') +
     xlim(c(-1.0, 1)) +
     xlab('Correlations difference') +
     ylab('Density') +
-    labs(fill='')
+    labs(color='')
 }
 
 cor.sim.df = data.frame()
@@ -1053,10 +1132,16 @@ cor.sim.df$comparison = as.factor(cor.sim.df$comparison)
 
 plot.2cor.similarity(cor.sim.df) +
     facet_wrap(. ~ animal, ncol = 3) 
-ggsave(paste0(gen_imgs_dir, 'cors_diff_faceted.png'), width = 23, height=18, units='cm')
+ggsave(paste0(gen_imgs_dir, 'S4-cors_diff_faceted.png'), width = width_2col, height=9, units='cm')
 
-plot.2cor.similarity(cor.sim.df) 
-ggsave(paste0(gen_imgs_dir, 'cors_diff.png'), width = 10, height=6, units='cm')
+g.cors.diff = plot.2cor.similarity(cor.sim.df) +
+  theme(legend.position = 'right') +
+  scale_y_continuous(breaks=c(0, 2, 4)) +
+  scale_x_continuous(breaks=c(-1.0, 0, 1.0))
+g.cors.diff
+ggsave(paste0(gen_imgs_dir, 'cors_diff.svg'), 
+       g.cors.diff,
+       width = 6.5, height=4.5, units='cm')
 ```
 
 Are diffferences much different than 0?
@@ -1124,11 +1209,13 @@ sem(unlist(atrcor.increases))
 ```
 
 
+
+
 Create summary of clusters for each animal
 
 ```{r}
-source('prob_of_reassignment.R')
 
+source('prob_of_reassignment.R')
 clus.summary.all = data.frame()
 clus.autocorr.all = data.frame()
 corr.change = list()
@@ -1146,7 +1233,7 @@ for (animal_id in unique(filtered.all.data$animal)) {
                                        get.corr.vals(cor.ach))
   
   g.dist.all = plot_grid(
-    plot.cor.dist(cor.ctrl, 'Ctrl', res.kmeans.all) + labs(title=''),
+    plot.cor.dist(cor.ctrl, 'Ctrl', res.kmeans.all, include.yaxis=TRUE) + labs(title=''),
     plot.cor.dist(cor.ach, 'ACh', res.kmeans.all) +
       labs(title=paste('Ctrl vs ACh p-val =', sprintf('%.2f', achcor.increase.result$p.value))),
     plot.cor.dist(cor.atr, 'Atr', res.kmeans.all) +
@@ -1196,7 +1283,7 @@ for (animal_id in unique(filtered.all.data$animal)) {
   animal.events.participation = filter(events.participation.df, animal == animal_id)
   reassignment.precentile = calc.reassigment.percentile(animal.events.participation)$percentile 
   g.population.assignments = plot.cluster.assignments(animal.events.participation) +
-    annotate('text', label=paste('p-val =', sprintf('%.2f', reassignment.precentile)),
+    annotate('text', label=paste('p-val=', sprintf('%.2f', reassignment.precentile)),
              x=1, y=50, size=8)
   
   #g.footer = plot_grid(g.cluster.assignments, 
@@ -1210,7 +1297,7 @@ for (animal_id in unique(filtered.all.data$animal)) {
                 g.pop.events,
                 g.population.assignments, 
                 labels = c('A','B', 'C', 'D', 'E'),
-                label_size = 32,
+                label_size = gtheme.label_size,
                 ncol=1, 
                 rel_heights = c(4, 3.5, 2, 2, 2),
                 rel_widths = c(2, 2, 2, 2, 1))
@@ -1219,8 +1306,8 @@ for (animal_id in unique(filtered.all.data$animal)) {
   ggsave(paste0(gen_imgs_dir, '/cluster_img_', animal_id, '.png'), 
          g,
          units='cm',
-         width=35,
-         height=50)
+         width=width_2col,
+         height=25)
 }  
 
 clus.summary.all$animal = as.factor(clus.summary.all$animal)
@@ -1229,21 +1316,88 @@ clus.summary.all$exp = factor(clus.summary.all$exp, levels=levels(filtered.all.d
 clus.autocorr.all$exp = factor(clus.autocorr.all$exp, levels=levels(filtered.all.data$exp))
 ```
 
-Clustering summary
-```{r}
-g.sil.widths = clus.summary.all %>%
-  filter(!(animal %in%c('Necab_M3', 'Yu_Thy1_1'))) %>%
-  ggplot(aes(x=exp, y=avg.silwidths, colour = animal)) +
-  geom_line(aes(group=animal), alpha=0.6) +
-  geom_point(size=3, alpha=0.5) +
-  # stat_compare_means(aes(label = paste0('p=', ..p.format..)),
-  #                    method='wilcox.test', paired=TRUE, 
-  #                    comparisons = list(c(1,2), c(2,3)))  +
-  gtheme +
-  #theme(legend.position = 'none') +
-  xlab('') + ylab('Mean silhouette width') 
+# Figure 3 - correlations in one network
+```{r warning=FALSE}
+animal_id = 'Necab_M13'
+binned.data = filter(all.data.binned, animal == animal_id)
+res.kmeans.all = assign.clusters(binned.data)
+cor.ctrl = get.cor.data(binned.data, 'Ctrl', res.kmeans.all)
+cor.ach = get.cor.data(binned.data, 'ACh', res.kmeans.all)
+cor.atr = get.cor.data(binned.data, 'Atr', res.kmeans.all)
+achcor.increase.result = wilcox.test(get.corr.vals(cor.ctrl), 
+                                     get.corr.vals(cor.ach))
+atrcor.increase.result = wilcox.test(get.corr.vals(cor.atr), 
+                                     get.corr.vals(cor.ach))
 
-g.sil.widths
+g.dist.all = plot_grid(
+  plot.cor.dist(cor.ctrl, 'Ctrl', res.kmeans.all, include.yaxis=TRUE) + ggtitle('Ctrl') + 
+    theme(legend.position='none', plot.margin=unit(c(0,0,0,0), 'mm')),
+  plot.cor.dist(cor.ach, 'ACh', res.kmeans.all) + ggtitle('ACh') +
+    theme(legend.position='none', plot.margin=unit(c(0,0,0,0), 'mm')),
+  plot.cor.dist(cor.atr, 'Atr', res.kmeans.all) + ggtitle('Atr') +
+    theme(legend.position='right', legend.key.width=unit(2,'mm'), plot.margin=unit(c(0,0,0,0), 'mm')) +
+    labs(fill=''),
+  ncol=3, rel_widths = c(1.3,1,1.6))
+
+animal.data = add.cluster.to.all(binned.data)
+
+clus.summary = get.clus.summary(res.kmeans.all)
+clus.summary$animal = rep(animal_id, 3)
+clus.summary.all = bind_rows(clus.summary.all, clus.summary)
+
+shuffled.ctrl = get.shuffled.cors(animal.data, 'Ctrl')
+shuffled.ach = get.shuffled.cors(animal.data, 'ACh')
+shuffled.atr = get.shuffled.cors(animal.data, 'Atr')
+
+cors.ctrl = get.cors.df(animal.data, 'Ctrl')
+cors.ach = get.cors.df(animal.data, 'ACh')
+cors.atr = get.cors.df(animal.data, 'Atr')
+
+
+g.shuffled.cors = plot_grid(
+  plot.shuffled.cors(shuffled.ctrl, cors.ctrl, includePval=TRUE) + gtheme,
+  plot.shuffled.cors(shuffled.ach, cors.ach, includePval=TRUE) + gtheme,
+  plot.shuffled.cors(shuffled.atr, cors.atr, includePval=TRUE) + gtheme,
+  ncol=3)
+corr.change[animal_id] = get.corr.change(animal.data)
+corr.changes.pct[[animal_id]] = calc.cor.changes.pct(animal.data)
+
+data = filter(filtered.all.data, animal == animal_id)
+g.activity.raster = make.activity.raster(data)
+
+animal.data = add.cluster.to.all(data)
+clus.autocorr.df = get.cluster.autocorr.df(animal.data) 
+clus.autocorr.df$animal = rep(animal_id, nrow(clus.autocorr.df))
+clus.autocorr.all = bind_rows(clus.autocorr.all, clus.autocorr.df)
+
+animal.events.participation = filter(events.participation.df, animal == animal_id)
+reassignment.precentile = calc.reassigment.percentile(animal.events.participation)$percentile 
+g.population.assignments = plot.cluster.assignments(animal.events.participation) +
+  labs(title=paste('p-val=', sprintf('%.2f', reassignment.precentile))) + 
+  theme(text=element_text(size=8), title=element_text(size=8, face='plain'))
+g.population.assignments
+
+g.clus.reassignment = plot_grid(g.cors.diff + theme(legend.position = 'top'), 
+                                g.population.assignments,
+                                ncol=2, 
+                                rel_widths = c(1.5,1), 
+                                labels=c('C','D'), label_size = gtheme.label_size)
+
+g = plot_grid(g.dist.all,
+              g.shuffled.cors,
+              g.clus.reassignment,
+              labels = c('A','B', 'C'),
+              label_size = gtheme.label_size,
+              ncol=1, 
+              rel_heights = c(1.7, 1.8, 2.3))
+
+ggsave(paste0(gen_imgs_dir, '3-correlations.png'), 
+       g,
+       units='cm',
+       #device=cairo_pdf,
+       dpi=200,
+       width=width_1col,
+       height=10.5)
 ```
 
 ```{r}
@@ -1251,76 +1405,39 @@ mean(unlist(corr.change))
 sd(unlist(corr.change))
 ```
 
-Correlations summary
-```{r}
-#corr.changes.pct
-
-```
-
 
 
 
 ```{r}
-#clus.autocorr.summary = clus.autocorr.all %>%
-#  filter(cluster == 1) %>%
-#  group_by(exp, lag) %>%
-#  dplyr::summarize(acf.coeff.m=mean(acf.coeff),
-#                   acf.coeff.sd=sd(acf.coeff))
-  
+
 # Autocorrelation on entire population signal
 pop.autocorr.lags = animal.data.binned %>%
-  ddply(.(animal, exp), summarize,
-        acf.coeff = get.acf(ztrace.mean, 1/bin.dur.sec),
-        lag=seq(0, acf.sec, bin.dur.sec))
-  
+  ddply(.(animal, exp), plyr::summarize,
+        acf.coeff = get.acf(ztrace.mean, 1/bin.dur.sec)$acf,
+        lag = get.acf(ztrace.mean, 1/bin.dur.sec)$lag)
+
 mpop.autocorr.lags = pop.autocorr.lags %>%
   group_by(exp,lag) %>%
   dplyr::summarise(acf.mean = mean(acf.coeff),
+                   acf.median = median(acf.coeff),
                    acf.sem = sem(acf.coeff)) 
-g.acorr.summary = mpop.autocorr.lags %>%
-  ggplot(aes(x=lag, y=acf.mean, group=exp)) +
-  geom_ribbon(aes(ymin=acf.mean - acf.sem, ymax=acf.mean + acf.sem), 
-              fill = "grey80", color='black', size=0.2) +
-  geom_line(size=1) +
+  
+g.acorr.summary = pop.autocorr.lags %>%
+  ggplot(aes(x=lag, y=acf.coeff)) +
+  #geom_ribbon(aes(ymin=acf.mean - acf.sem, ymax=acf.mean + acf.sem), 
+  #            fill = "grey80", color='black', size=0.2) +
+  geom_line(aes(group=animal), size=0.1) +
+  geom_line(data=mpop.autocorr.lags, mapping=aes(x=lag,y=acf.median), size=1) +
   facet_grid(. ~  exp) +
   gtheme +
-  xlim(c(0,39))+
+  xlim(c(0,50))+
+  scale_x_continuous(breaks=c(0,20,40)) +
   #theme(axis.text.x = element_text(angle = -45, hjust = 1)) +
   geom_hline(yintercept=0, linetype='dashed', color='red') +
   xlab('Lag (sec)') +
   ylab('Autocorrelation') 
-  
-# # Autocorrelation for each cluster
-# clus.autocorr.all %>%
-#   #filter(cluster == 1) %>%
-#   mutate(animal_clus = paste(animal, str(cluster), sep='_')) %>%
-#   ggplot(aes(x=lag, y=acf.coeff)) +
-#   #geom_line(aes(group=animal_clus), alpha=0.2) +
-#   geom_line(data=clus.autocorr.summary, aes(x=lag, y=acf.coeff.m), size=1) +
-#   facet_grid(. ~  exp) +
-#   gtheme +
-#   geom_hline(yintercept=0, linetype='dashed', color='red') +
-#   xlab('Lag (sec)') +
-#   ylab('Autocorrelation') 
-#   
-# # Autocorrelation on the better correlated cluster
-# ggplot(clus.autocorr.summary) +
-#   geom_ribbon(data=clus.autocorr.summary, 
-#               aes(x=lag, ymin=acf.coeff.m - acf.coeff.sd, ymax=acf.coeff.m + acf.coeff.sd), 
-#               fill = "grey80", color='black', size=0.2) +
-#   geom_line(data=clus.autocorr.summary, aes(x=lag, y=acf.coeff.m), size=1) +
-#   facet_grid(. ~  exp) +
-#   geom_hline(yintercept=0, linetype='dashed', color='red') +
-#   gtheme +
-#   xlab('Lag (sec)') +
-#   ylab('Autocorrelation') 
 
 g.acorr.summary
-ggsave(paste0(gen_imgs_dir, '4-autocorrelation.png'), 
-       g.acorr.summary,
-       units='cm',
-       width=13,
-       height=6)
 ```
 Time to first peak
 ```{r}
@@ -1364,6 +1481,28 @@ peak.autocorr.lags = ddply(pop.autocorr.lags,
       peak.time=get.fst.peak.index(lag, acf.coeff)[['time']] %>% unlist,
       peak.val=get.fst.peak.index(lag, acf.coeff)[['val']] %>% unlist) 
 
+peak.autocorr.lags %>%
+  filter(exp != 'Atr') %>%
+  ggplot() +
+  geom_point(aes(x=peak.time, y=peak.val, colour=exp)) +
+  gtheme +
+  xlab('Peak lag (s)') +
+  ylab('Peak autocorrelation')
+  
+
+g.acorr.change = peak.autocorr.lags %>%
+  #filter(peak.val > 0.02) %>%
+  ggplot(aes(x=exp, y= peak.time)) +
+  geom_line(aes(group=animal)) +
+  geom_point(aes(size=peak.val), shape=21, stroke=px2pt) + 
+  gtheme +
+  xlab('') +
+  labs(size='Value') +
+  ylab('Peak lag (s)') +
+  theme(legend.position = 'none')
+g.acorr.change
+  
+
 group_by(peak.autocorr.lags, exp) %>%
   dplyr::summarise(n=n() - sum(is.na(peak.time)),
                    mean.peak.val = mean(peak.val, na.rm=TRUE),
@@ -1375,8 +1514,8 @@ group_by(peak.autocorr.lags, exp) %>%
                    mean.peak.time = median(peak.time, na.rm = TRUE),
                    sem.peak.time= sem(peak.time))
 
-
 wilcox.test(peak.time ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE)
+wilcox.test(peak.val ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE)
 
 # 
 # autocorr.peak.df = ddply(clus.autocorr.all, 
@@ -1391,94 +1530,107 @@ wilcox.test(peak.time ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE
 # summary(subset(autocorr.peak.df, exp=='ACh')$peak.val, digits=1)
 ```
 
-```{r}
-library(ggpubr)
 
-# autocorr.peak.df %>%
-#   filter(exp %in% c('Ctrl', 'ACh')) %>%
-#   ggpubr::ggpaired(x='exp', y='peak.time', id='animal') +
-#   stat_compare_means(aes(label = paste0('p=', ..p.format..)),
-#                      method='wilcox.test', paired=TRUE, na.rm=TRUE) 
+# Figure 2 - population events
 
-autocorr.peak.df %>%
-  filter(exp %in% c('Ctrl', 'ACh')) %>%
-  ggplot(aes(x=exp, y=peak.time)) +
-  geom_line(aes(group=animal)) +
-  geom_point(size=3, alpha=0.6) +
-   #stat_compare_means(aes(label = paste0('p=', ..p.format..)),
-   #                   method='wilcox.test', paired=TRUE, 
-   #                   comparisons = list(c(1,2)))  +
-  xlab('') + ylab('Periodicty of activity (sec)') +
-  gtheme
+```{r warning=FALSE}
 
-#t.test(peak.time ~ exp, X, paired=TRUE)
-```
+g.pop.events = plot.pop.events(animal_id) +
+  theme(strip.background = element_blank(), strip.text = element_blank())
 
-```{r}
-plot_grid(g.sil.widths, g.acorr.summary,
-          labels=c('A', 'B'), label_size = 32,
-          rel_widths = c(2,2))
+g.acorr = plot_grid(grob(),
+                    g.acorr.summary, 
+                    grob(),
+                    g.acorr.change,
+                    ncol=4,
+                    labels=c('E', '', 'F', ''), label_size=gtheme.label_size, 
+                    rel_widths = c(0.3,4,0.3,3))
+g.pop = plot_grid(
+  g.activity.raster, 
+  plot_grid(grob(), g.pop.events, rel_widths = c(0.1,3), ncol=2), 
+  g.pop.event.stats,
+  g.acorr,
+  ncol=1, labels=c('A','B','', ''), label_size = gtheme.label_size,
+  rel_heights = c(3, 2, 2, 3))
 
-ggsave(paste0(gen_imgs_dir, '/fig_clus_sum.png'), 
+ggsave(paste0(gen_imgs_dir, '2-population-activity.png'), 
+       g.pop,
        units='cm',
-       width=23,
-       height=11)
+       width=width_2col,
+       height=15)
+
 ```
 
-```{r}
-g.footer = plot_grid(g.acorr.summary, g.sil.widths,
-          labels=c('', 'D'), ncol=2,
-          rel_widths=c(2,1), 
-          label_size=32)
-plot_grid(g.activity.raster,
-          g.dist.all,
-          g.footer,
-          labels=c('A', 'B', 'C'), ncol=1,
-          rel_heights=c(1.8,1.5,1.5), 
-          label_size=32)
-
-ggsave(paste0(gen_imgs_dir, 'fig.pdf'), 
-       units='cm',
-       width=25, height=35)
-```
 
 
 ```{r}
-ggsave(paste0(gen_imgs_dir, 'S1-cells_hist.png'), g.slices,
-       width=6, height=5, units='cm')
+ggsave(paste0(gen_imgs_dir, 'S1-cells_hist.png'), g.slices + gtheme,
+       width=3.5, height=3, units='cm')
 
-#g.cor.heatmap
-g1 = plot_grid(g.trace,  g.activity.raster, 
-               g.cluster.trace,
-               g.autocorr, ncol=1, rel_heights = c(1,2, 1.5, 1))
-ggsave(paste0(gen_imgs_dir, '/Fig1.png'), 
-       g1,
-       units='cm',
-       width=30,
-       height=40)
-
-g2 = plot_grid(#g.diff.ach.auc, g.diff.atr.auc, 
-               g.diff.ach.mer, g.diff.atr.mer, 
-               g.event.cdf, ncol=2,
-               labels=c('A', 'B', 'C'), label_size = 32)
-ggsave(paste0(gen_imgs_dir, '/Fig2.png'), 
-       g2,
-       units='cm',
-       width=30,
-       height=25)
 ```
 
 
-PCA
+# Correlations vs distance
+```{r warning=FALSE}
+coords.df = read.csv(paste(rootdata_dir, 'coords.csv', sep='/'))
+joined.coords = left_join(coords.df, coords.df, 
+                          by=c('animal'),
+                          suffix=c('.fst', '.snd')) 
+dist.df = joined.coords %>%
+  mutate(dist = sqrt((x.fst-x.snd)^2 + (y.fst - y.snd)^2)) %>%
+  select(animal, cell.fst, cell.snd, dist)
+
+
+cor.df = data.frame()
+for (animal_id in unique(filtered.all.data$animal)) {
+  binned.data = filter(all.data.binned, animal == animal_id)
+  res.kmeans.all = assign.clusters(binned.data)
+  
+  cor.ctrl = get.cor.data(binned.data, 'Ctrl', res.kmeans.all)
+  cor.ctrl.df = melt(cor.ctrl) %>%
+    dplyr::rename(cell.fst=Var1, cell.snd=Var2, cor=value)
+  cor.ctrl.df$animal = rep(animal_id, nrow(cor.ctrl.df))
+  cor.ctrl.df$exp = rep('Ctrl', nrow(cor.ctrl.df))
+  
+  cor.ach = get.cor.data(binned.data, 'ACh', res.kmeans.all)
+  cor.ach.df = melt(cor.ach) %>%
+    dplyr::rename(cell.fst=Var1, cell.snd=Var2, cor=value)
+  cor.ach.df$animal = rep(animal_id, nrow(cor.ach.df))
+  cor.ach.df$exp = rep('ACh', nrow(cor.ach.df))
+  
+  cor.atr = get.cor.data(binned.data, 'Atr', res.kmeans.all)
+  cor.atr.df = melt(cor.atr) %>%
+    dplyr::rename(cell.fst=Var1, cell.snd=Var2, cor=value)
+  cor.atr.df$animal = rep(animal_id, nrow(cor.atr.df))
+  cor.atr.df$exp = rep('Atr', nrow(cor.atr.df))
+  
+  cor.df = bind_rows(cor.df, cor.ctrl.df, cor.ach.df, cor.atr.df)
+}
+cor.df$animal = as.factor(cor.df$animal)
+cor.df$exp = as.factor(cor.df$exp)
+
+cordist.df = left_join(dist.df, cor.df, by=c('animal', 'cell.fst', 'cell.snd'))
+```
+
 ```{r}
-animal.data = filter(all.data.binned, animal == 'Necab_M13')
-select(data, date, animal, exp, frame, cell_id, trace) %>% 
-  spread(cell_id, trace) -> data.spread
+cordist.df %>%
+  filter(cell.fst != cell.snd) %>%
+  group_by(animal, exp) %>%
+  sample_n(50) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_point(aes(x=dist * 1.1, y=cor, colour=animal), size=0.2, alpha=0.4) +
+  gtheme +
+  facet_grid(. ~ exp) +
+  labs(colour='') +
+  theme(legend.position = 'none') +
+        #axis.text.x = element_text(angle = -90, hjust = 1)) +
+  scale_x_continuous(breaks=c(0,200,400))+
+  xlab('Distance (um)') +
+  ylab('Correlation')
 
-exp.data = filter(data.spread, exp=='ACh')
-pca.data = prcomp(exp.data[,5:ncol(exp.data)], scale. = TRUE)
-summary(pca.data)
+ggsave(paste0(gen_imgs_dir, 'S2-corr_vs_distance.png'), 
+       width=7, height=5, units='cm')
 ```
-
 
 

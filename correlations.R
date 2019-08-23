@@ -107,22 +107,22 @@ get.cors.df = function(data, cond) {
   create.cor.values.df(x, 1)
 }
 
-plot.shuffled.cors = function(shuffled.df, cors.df) {
+plot.shuffled.cors = function(shuffled.df, cors.df, includePval=TRUE) {
   library(grid)
   pvals = signif.shuffled.cors(shuffled.df, cors.df)
   
-  pvaltext = sprintf('max p-val = %.2f',max(pvals))
-  grob <- grobTree(textGrob(pvaltext, x=0.1,  y=0.5, hjust=0,
-                   gp=gpar(col="red", fontsize=10, fontface="italic")))
-  
-  ggplot() + 
+  g = ggplot() + 
     stat_ecdf(data=shuffled.df, aes(x=vals, group=shuffle_i), geom='step', alpha=0.6) +
     stat_ecdf(data=cors.df, mapping=aes(x=vals), colour='red', geom='step') +
-    #geom_density(data=shuffled.df, aes(x=vals, group=shuffle_i), alpha=0.6, bw='SJ') +
-    #geom_density(data=cors.df, mapping=aes(x=vals),colour='red', bw='SJ') +
-    annotation_custom(grob) +
-    xlim(c(-1.0, 1.0)) +
+    scale_y_continuous(breaks=c(0.0, 0.5, 1.0)) +
+    scale_x_continuous(breaks=c(-1.0, 0.0, 1.0), limits = c(-1,1)) +
     xlab('Correlation') + ylab('Probability')
+  
+  if (includePval) {
+    pvaltext = sprintf('max p-val=%.2f',max(pvals))
+    g = g + ggtitle(pvaltext)
+  }
+  return(g)
 }
 
 

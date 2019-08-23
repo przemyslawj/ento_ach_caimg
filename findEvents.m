@@ -8,7 +8,7 @@ if nargin < 4
     manuallyAdjust = false;
 end
 
-minpeak_dF = 0.3;
+minpeak_dF = 0.05;
 maxpeak_dF = 1.0;
 
 ncells = size(dF, 2);

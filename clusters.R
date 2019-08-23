@@ -79,10 +79,9 @@ plot.activity.raster = function(data, bin.width) {
     #geom_hline(data=cluster.data, mapping=aes(yintercept=order.max+0.5), color='red')+
     facet_grid(. ~ exp) +
     gtheme +
-    labs(fill='zscored dF/F') +
-    theme(legend.position = 'top') +
+    labs(fill='z-scored dF/F') +
     #scale_y_reverse() +
-    scale_fill_viridis() +
+    scale_fill_viridis(breaks=c(0, 5)) +
     ylab('Cell') +
     xlab('Time (sec)')
 }

@@ -185,6 +185,12 @@ zscore = function(x) {
   return(x)
 }
 
+#zscore = function(x) {
+#  x = (x - mean(x)) / sd(x)
+#  lowval = quantile(x, probs=0.05)[1]
+#  return(x - lowval)
+#}
+
 selected.timestamps.df = data.frame(
   animal=rep(c('Necab_M3', 'Necab_M4', 'Necab_M8', 'Necab_M11', 'Necab_M13', 
               'Yu_Thy1_1', 'Yu_Thy1_2', 'Yu_Thy1_3', 'Yu_Thy1_4', 'Yu_Thy1_5', 'Yu_Thy1_7'), each=3),
@@ -715,7 +721,17 @@ Autocorrelogram
 acf.sec = 50
 get.acf = function(x, fr) {
   acf.res = acf(x, lag.max=(fr * acf.sec), plot=FALSE)
-  return(list(acf=c(acf.res$acf), lag=c(acf.res$lag) / fr))
+  ci = 0.95
+  n = acf.res$n.used
+  clim0 = qnorm((1 + ci)/2) 
+  r = acf.res$acf
+  se = c()
+  for (k in 1:length(acf.res$lag)) {
+    se[k] = sqrt(1 + sum(2 * r[1:(k-1)]^2)) / sqrt(n)
+  }
+  clim = se * clim0
+  signif = 1 - c(0, pnorm(r[-1] / se[-length(se)]))
+  return(list(acf=c(acf.res$acf), lag=c(acf.res$lag) / fr, ci=clim, signif=signif))
 }
 
 
@@ -1414,7 +1430,9 @@ sd(unlist(corr.change))
 pop.autocorr.lags = animal.data.binned %>%
   ddply(.(animal, exp), plyr::summarize,
         acf.coeff = get.acf(ztrace.mean, 1/bin.dur.sec)$acf,
-        lag = get.acf(ztrace.mean, 1/bin.dur.sec)$lag)
+        lag = get.acf(ztrace.mean, 1/bin.dur.sec)$lag, 
+        ci = get.acf(ztrace.mean, 1/bin.dur.sec)$ci,
+        signif = get.acf(ztrace.mean, 1/bin.dur.sec)$signif)
 
 mpop.autocorr.lags = pop.autocorr.lags %>%
   group_by(exp,lag) %>%
@@ -1423,11 +1441,13 @@ mpop.autocorr.lags = pop.autocorr.lags %>%
                    acf.sem = sem(acf.coeff)) 
   
 g.acorr.summary = pop.autocorr.lags %>%
-  ggplot(aes(x=lag, y=acf.coeff)) +
+  filter(animal == 'Necab_M13') %>%
+  ggplot(aes(x=lag)) +
   #geom_ribbon(aes(ymin=acf.mean - acf.sem, ymax=acf.mean + acf.sem), 
   #            fill = "grey80", color='black', size=0.2) +
-  geom_line(aes(group=animal), size=0.1) +
-  geom_line(data=mpop.autocorr.lags, mapping=aes(x=lag,y=acf.median), size=1) +
+  geom_ribbon(aes(group=animal, ymax=ci, ymin=-ci), fill='grey80' ) +
+  geom_line(aes(group=animal, y=acf.coeff)) +
+  #geom_line(data=mpop.autocorr.lags, mapping=aes(x=lag,y=acf.median), size=1) +
   facet_grid(. ~  exp) +
   gtheme +
   xlim(c(0,50))+
@@ -1441,7 +1461,7 @@ g.acorr.summary
 ```
 Time to first peak
 ```{r}
-get.fst.peak.index = function(x, y) {
+get.fst.peak.index = function(x, y, signif) {
   filter.width = 3
   y.filtered = stats::filter(y, rep(1/filter.width, filter.width), sides=2)
   
@@ -1468,33 +1488,36 @@ get.fst.peak.index = function(x, y) {
   if (length(local.maxima.filtered) == 0) {
     min.index=fst.negative
     idx = which.max(y[min.index:length(y)]) + min.index - 1
-    return(list(index=idx, time=x[idx], val=y[idx]))
+    return(list(index=idx, time=x[idx], val=y[idx], signif=signif[idx]))
   }
   index = local.maxima.filtered[1]
-  list(index=index, time=x[index], val=y[index])
+  list(index=index, time=x[index], val=y[index], signif=signif[index])
 }
 
 peak.autocorr.lags = ddply(pop.autocorr.lags,
       .(animal, exp),
       plyr::summarise,
-      peak.index=get.fst.peak.index(lag, acf.coeff)[['index']] %>% unlist,
-      peak.time=get.fst.peak.index(lag, acf.coeff)[['time']] %>% unlist,
-      peak.val=get.fst.peak.index(lag, acf.coeff)[['val']] %>% unlist) 
+      peak.index=get.fst.peak.index(lag, acf.coeff, signif)[['index']] %>% unlist,
+      peak.time=get.fst.peak.index(lag, acf.coeff, signif)[['time']] %>% unlist,
+      peak.val=get.fst.peak.index(lag, acf.coeff, signif)[['val']] %>% unlist,
+      peak.signif=get.fst.peak.index(lag, acf.coeff, signif)[['signif']] %>% unlist) 
 
 peak.autocorr.lags %>%
+  filter(peak.signif <= 0.05) %>%
   filter(exp != 'Atr') %>%
   ggplot() +
-  geom_point(aes(x=peak.time, y=peak.val, colour=exp)) +
+  geom_point(aes(x=peak.time, y=peak.val, size=1-peak.signif, colour=exp)) +
   gtheme +
   xlab('Peak lag (s)') +
   ylab('Peak autocorrelation')
   
 
 g.acorr.change = peak.autocorr.lags %>%
-  #filter(peak.val > 0.02) %>%
-  ggplot(aes(x=exp, y= peak.time)) +
-  geom_line(aes(group=animal)) +
-  geom_point(aes(size=peak.val), shape=21, stroke=px2pt) + 
+  #filter(peak.signif <= 0.05) %>%
+  ggplot(aes(x=exp, y=peak.time)) +
+  #geom_line(aes(group=animal), size=0.1) +
+  #geom_point(aes(size=1-peak.signif), shape=21, stroke=px2pt) + 
+  geom_point(aes(alpha=if_else(peak.signif <= 0.05, 1.0, 0.5))) + 
   gtheme +
   xlab('') +
   labs(size='Value') +
@@ -1509,7 +1532,10 @@ group_by(peak.autocorr.lags, exp) %>%
                    sem.peak.val = sem(peak.val))
 wilcox.test(peak.val ~ exp, filter(peak.autocorr.lags, exp!='Atr'))
   
-group_by(peak.autocorr.lags, exp) %>%
+peak.autocorr.lags %>%
+  filter(peak.signif <= 0.05) %>%
+  group_by(exp) %>%
+  ggplot(aes(x=exp, y=peak.time)) +
   dplyr::summarise(n=n() - sum(is.na(peak.time)),
                    mean.peak.time = median(peak.time, na.rm = TRUE),
                    sem.peak.time= sem(peak.time))
@@ -1517,7 +1543,7 @@ group_by(peak.autocorr.lags, exp) %>%
 wilcox.test(peak.time ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE)
 wilcox.test(peak.val ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE)
 
-# 
+# signif = c(1, pnorm(r[-1] / se[-length(se)])
 # autocorr.peak.df = ddply(clus.autocorr.all, 
 #       .(animal, exp, cluster), 
 #       summarize,
@@ -1543,15 +1569,21 @@ g.acorr = plot_grid(grob(),
                     grob(),
                     g.acorr.change,
                     ncol=4,
-                    labels=c('E', '', 'F', ''), label_size=gtheme.label_size, 
+                    labels=c('A', '', 'B', ''), label_size=gtheme.label_size, 
                     rel_widths = c(0.3,4,0.3,3))
+ggsave(paste0(gen_imgs_dir, '3-autocorrelation.png'), 
+       g.acorr,
+       units='cm',
+       width=width_2col,
+       height=5)
+
 g.pop = plot_grid(
   g.activity.raster, 
   plot_grid(grob(), g.pop.events, rel_widths = c(0.1,3), ncol=2), 
   g.pop.event.stats,
-  g.acorr,
-  ncol=1, labels=c('A','B','', ''), label_size = gtheme.label_size,
-  rel_heights = c(3, 2, 2, 3))
+  #g.acorr,
+  ncol=1, labels=c('A','B',''), label_size = gtheme.label_size,
+  rel_heights = c(3, 2, 2))
 
 ggsave(paste0(gen_imgs_dir, '2-population-activity.png'), 
        g.pop,

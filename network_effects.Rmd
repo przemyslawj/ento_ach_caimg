@@ -651,13 +651,15 @@ silwidths$animal = rep(animal_file, nrow(silwidths))
 ```
 
 ```{r}
-plot.cluster.assignments = function(silwidths) {
+plot.cluster.assignments = function(clust.df, clust.distance=0) {
   
- clust.distance = nrow(silwidths)/2
+ if (clust.distance==0) {
+   clust.distance = nrow(clust.df)/2
+ }
   
- my.clust.df = select(silwidths, animal, cell_id, exp, my.clust) %>%
+ my.clust.df = select(clust.df, cell_id, exp, my.clust) %>%
     spread(exp, my.clust)
- if (! (all(levels(silwidths$exp) %in% colnames(my.clust.df)))) {
+ if (! (all(levels(clust.df$exp) %in% colnames(my.clust.df)))) {
    return(ggplot())
  }
  
@@ -673,20 +675,19 @@ plot.cluster.assignments = function(silwidths) {
    group_by(ACh) %>%
    mutate(ACh.ordinal=row_number(ACh))  %>% 
    ungroup() %>%
-   select(animal, cell_id, ends_with('ordinal')) %>%
+   select(cell_id, ends_with('ordinal')) %>%
    gather('Ctrl.ordinal', 'ACh.ordinal', 'Atr.ordinal', key='exp', value='ordinal') 
  
   ordinal.df$exp = str_replace(ordinal.df$exp,'.ordinal','')
-  ordinal.df$exp = factor(ordinal.df$exp, levels = levels(silwidths$exp))
-  s = left_join(silwidths, ordinal.df, by=c('animal','cell_id', 'exp')) %>%
-    mutate(animal_cell = paste(animal, cell_id, sep='_'))
+  ordinal.df$exp = factor(ordinal.df$exp, levels = levels(clust.df$exp))
+  s = left_join(clust.df, ordinal.df, by=c('cell_id', 'exp'))
   
   s %>%
     group_by(exp,cluster) %>%
     mutate(row_ordinal = (my.clust - 1) * clust.distance + ordinal) %>%
     ggplot() +
-    geom_point(aes(x=exp,y=row_ordinal), size=2) +
-    geom_line(aes(x=exp,y=row_ordinal, group=animal_cell), alpha=0.2, size=1) +
+    #geom_point(aes(x=exp,y=row_ordinal), size=2) +
+    geom_line(aes(x=exp,y=row_ordinal, group=cell_id), alpha=0.1, size=1) +
     gtheme +
     scale_y_continuous(trans = "reverse") +
     xlab('') + ylab('') +
@@ -1000,7 +1001,7 @@ ggsave(paste0(gen_imgs_dir, 'S5-pop_events_participation.png'),
 Clustering based on population events
 ```{r}
 
-events.participation.thr = 60
+events.participation.thr = 70
 events.participation.df = pop.events.signal %>%
   mutate(is.active = ztrace > pop.event.thr) %>%
   group_by(animal, exp, cell_id) %>%
@@ -1017,14 +1018,22 @@ events.participation.df %>%
                    n2=sum(my.clust==2),
                    total_events=max(total_events))
 ```
-```{r}
+
+```{r, warnings=FALSE}
+source('prob_of_reassignment.R')
 X = events.participation.df %>%
-  #filter(animal %in% c('Necab_M8', 'Necab_M11', 'Necab_M13'))
-  filter(animal == 'Yu_Thy1_7')
-plot.cluster.assignments(X) 
+  filter(animal %in% c('Necab_M8', 'Necab_M11', 'Necab_M13', 
+                       'Yu_Thy1_2', 'Yu_Thy1_3', 'Yu_Thy1_4',
+                       'Yu_Thy1_5', 'Yu_Thy1_7'))
+  #filter(animal == 'Yu_Thy1_5') 
+
+X = mutate(X, cell_id = (as.numeric(animal) - 1) * 300 + as.numeric(as.character(cell_id)))
+g.cluster.assignments.all = plot.cluster.assignments(ungroup(X), clust.distance=220) 
+g.cluster.assignments.all
 ggsave(paste0(gen_imgs_dir,'pop_events_participation_change_thr', num2str(events.participation.thr, fmt=0) ,'.png'),
        units = 'cm',
        width = 8, height = 6) 
+calc.reassigment.percentile(ungroup(X))$percentile 
 ```
 
 Are events part of population events
@@ -1113,8 +1122,8 @@ data.summary = create.cell.summary(filtered.all.data)
 ```{r}
 calc.2cor.similarity = function(cor.ctrl, cor.ach, cor.atr, animal_id) {
   sim.cor1 = (cor.ach - cor.ctrl) %>% melt %>% mutate(comparison='ACh - Ctrl')
+    sim.cor3 = (cor.ach - cor.atr) %>% melt %>% mutate(comparison='ACh - Atr')
   sim.cor2 = (cor.ctrl - cor.atr) %>% melt %>% mutate(comparison='Ctrl - Atr')
-  sim.cor3 = (cor.ach - cor.atr) %>% melt %>% mutate(comparison='ACh - Atr')
   
   bind_rows(sim.cor1, sim.cor2, sim.cor3) %>%
     mutate(animal=animal_id) %>%
@@ -1145,6 +1154,8 @@ for (animal_id in unique(filtered.all.data$animal)) {
 }
 cor.sim.df$animal = as.factor(cor.sim.df$animal)
 cor.sim.df$comparison = as.factor(cor.sim.df$comparison)
+cor.sim.df$comparison = factor(cor.sim.df$comparison, 
+                               levels=c('ACh - Ctrl', 'ACh - Atr', 'Ctrl - Atr'))
 
 plot.2cor.similarity(cor.sim.df) +
     facet_wrap(. ~ animal, ncol = 3) 
@@ -1160,7 +1171,7 @@ ggsave(paste0(gen_imgs_dir, 'cors_diff.svg'),
        width = 6.5, height=4.5, units='cm')
 ```
 
-Are diffferences much different than 0?
+Are differences much different than 0?
 ```{r}
 
 ks.results = list()
@@ -1229,7 +1240,7 @@ sem(unlist(atrcor.increases))
 
 Create summary of clusters for each animal
 
-```{r}
+```{r, warning=FALSE}
 
 source('prob_of_reassignment.R')
 clus.summary.all = data.frame()
@@ -1276,8 +1287,8 @@ for (animal_id in unique(filtered.all.data$animal)) {
   
   g.shuffled.cors = plot_grid(
     plot.shuffled.cors(shuffled.ctrl, cors.ctrl) + gtheme,
-    plot.shuffled.cors(shuffled.ach, cors.ach) + gtheme,
-    plot.shuffled.cors(shuffled.atr, cors.atr) + gtheme,
+    plot.shuffled.cors(shuffled.ach, cors.ach, includeYaxis=F) + gtheme,
+    plot.shuffled.cors(shuffled.atr, cors.atr, includeYaxis=F) + gtheme,
     ncol=3)
   corr.change[animal_id] = get.corr.change(animal.data)
   corr.changes.pct[[animal_id]] = calc.cor.changes.pct(animal.data)
@@ -1332,7 +1343,68 @@ clus.summary.all$exp = factor(clus.summary.all$exp, levels=levels(filtered.all.d
 clus.autocorr.all$exp = factor(clus.autocorr.all$exp, levels=levels(filtered.all.data$exp))
 ```
 
-# Figure 3 - correlations in one network
+# Figure 4 - correlations across networks
+```{r, warning=FALSE}
+cors.change.df = data.frame()
+cors.pval.df = data.frame()
+for (animal_id in unique(filtered.all.data$animal)) {
+  binned.data = filter(all.data.binned, animal == animal_id)
+  res.kmeans.all = assign.clusters(binned.data)
+  animal.data = add.cluster.to.all(binned.data)
+  
+  shuffled.ctrl = get.shuffled.cors(animal.data, 'Ctrl')
+  shuffled.ach = get.shuffled.cors(animal.data, 'ACh')
+  shuffled.atr = get.shuffled.cors(animal.data, 'Atr')
+  
+  cors.ctrl = get.cors.df(animal.data, 'Ctrl')
+  cors.ach = get.cors.df(animal.data, 'ACh')
+  cors.atr = get.cors.df(animal.data, 'Atr')
+  
+  pval.ctrl = signif.shuffled.cors(shuffled.ctrl, cors.ctrl) %>% quantile(probs=0.95)
+  pval.ach = signif.shuffled.cors(shuffled.ach, cors.ach) %>% quantile(probs=0.95)
+  pval.atr = signif.shuffled.cors(shuffled.atr, cors.atr) %>% quantile(probs=0.95)
+  animal.pval.df = data.frame(exp=c('Ctrl', 'ACh', 'Atr'),
+                              pval=c(pval.ctrl[1], pval.ach[1], pval.atr[1]))
+  animal.pval.df$animal = rep(animal_id, 3)
+  
+  animal.change.df = bind_rows(cors.ctrl, cors.ach, cors.atr)
+  animal.change.df$animal = rep(animal_id, nrow(animal.change.df))
+  if (nrow(cors.change.df) > 0) {
+    cors.change.df = bind_rows(cors.change.df, animal.change.df)
+  } else {
+    cors.change.df = animal.change.df
+  }
+  
+  cors.pval.df = bind_rows(cors.pval.df, animal.pval.df)
+}
+```
+
+```{r}
+cors.change.df$exp = factor(cors.change.df$exp, levels=c('Ctrl', 'ACh', 'Atr'))
+cors.pval.df$exp = factor(cors.pval.df$exp, levels=c('Ctrl', 'ACh', 'Atr'))
+cors.pval.df$animal = as.factor(cors.pval.df$animal)
+cors.pval.df$exp = as.factor(cors.pval.df$exp)
+summary.cors.change.df = cors.change.df %>%
+  group_by(animal, exp) %>%
+  dplyr::summarise(med.cor = median(vals),
+                   sem.cor = sem(vals))
+summary.cors.change.joined = summary.cors.change.df %>% left_join(cors.pval.df, by=c('exp', 'animal'))
+
+summary.cors.change.joined %>%
+  filter(pval <= 0.05) %>%
+  ggplot(mapping=aes(x=exp, y=med.cor)) +
+  geom_line(aes(group=animal), size=0.2) +
+  geom_point() +
+  gtheme +
+  xlab('') +
+  ylab('Median correlation') ->
+g.cors.change.summary
+
+g.cors.change.summary
+```
+
+
+# Figure 4 - correlations in one network
 ```{r warning=FALSE}
 animal_id = 'Necab_M13'
 binned.data = filter(all.data.binned, animal == animal_id)
@@ -1353,7 +1425,7 @@ g.dist.all = plot_grid(
   plot.cor.dist(cor.atr, 'Atr', res.kmeans.all) + ggtitle('Atr') +
     theme(legend.position='right', legend.key.width=unit(2,'mm'), plot.margin=unit(c(0,0,0,0), 'mm')) +
     labs(fill=''),
-  ncol=3, rel_widths = c(1.3,1,1.6))
+  ncol=3, rel_widths = c(1.25,1.1,1.6))
 
 animal.data = add.cluster.to.all(binned.data)
 
@@ -1370,11 +1442,18 @@ cors.ach = get.cors.df(animal.data, 'ACh')
 cors.atr = get.cors.df(animal.data, 'Atr')
 
 
+gtheme_noyaxis = gtheme +
+    theme(axis.line.y = element_blank(),
+          axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank())
 g.shuffled.cors = plot_grid(
-  plot.shuffled.cors(shuffled.ctrl, cors.ctrl, includePval=TRUE) + gtheme,
-  plot.shuffled.cors(shuffled.ach, cors.ach, includePval=TRUE) + gtheme,
-  plot.shuffled.cors(shuffled.atr, cors.atr, includePval=TRUE) + gtheme,
-  ncol=3)
+  plot.shuffled.cors(shuffled.ctrl, cors.ctrl) + gtheme,
+  plot.shuffled.cors(shuffled.ach, cors.ach) + gtheme_noyaxis,
+  plot.shuffled.cors(shuffled.atr, cors.atr) + gtheme_noyaxis,
+  g.cors.change.summary,
+  ncol=4,
+  rel_widths=c(1.5, 1.0, 1.0, 1.7))
 corr.change[animal_id] = get.corr.change(animal.data)
 corr.changes.pct[[animal_id]] = calc.cor.changes.pct(animal.data)
 
@@ -1386,15 +1465,15 @@ clus.autocorr.df = get.cluster.autocorr.df(animal.data)
 clus.autocorr.df$animal = rep(animal_id, nrow(clus.autocorr.df))
 clus.autocorr.all = bind_rows(clus.autocorr.all, clus.autocorr.df)
 
-animal.events.participation = filter(events.participation.df, animal == animal_id)
-reassignment.precentile = calc.reassigment.percentile(animal.events.participation)$percentile 
-g.population.assignments = plot.cluster.assignments(animal.events.participation) +
-  labs(title=paste('p-val=', sprintf('%.2f', reassignment.precentile))) + 
-  theme(text=element_text(size=8), title=element_text(size=8, face='plain'))
-g.population.assignments
+#animal.events.participation = filter(events.participation.df, animal == animal_id)
+#reassignment.precentile = calc.reassigment.percentile(animal.events.participation)$percentile 
+#g.population.assignments = plot.cluster.assignments(animal.events.participation) +
+#  labs(title=paste('p-val=', sprintf('%.2f', reassignment.precentile))) + 
+#  theme(text=element_text(size=8), title=element_text(size=8, face='plain'))
+#g.population.assignments
 
 g.clus.reassignment = plot_grid(g.cors.diff + theme(legend.position = 'top'), 
-                                g.population.assignments,
+                                g.cluster.assignments.all,
                                 ncol=2, 
                                 rel_widths = c(1.5,1), 
                                 labels=c('C','D'), label_size = gtheme.label_size)
@@ -1407,7 +1486,7 @@ g = plot_grid(g.dist.all,
               ncol=1, 
               rel_heights = c(1.7, 1.8, 2.3))
 
-ggsave(paste0(gen_imgs_dir, '3-correlations.png'), 
+ggsave(paste0(gen_imgs_dir, '4-corrs.png'), 
        g,
        units='cm',
        #device=cairo_pdf,
@@ -1502,43 +1581,40 @@ peak.autocorr.lags = ddply(pop.autocorr.lags,
       peak.val=get.fst.peak.index(lag, acf.coeff, signif)[['val']] %>% unlist,
       peak.signif=get.fst.peak.index(lag, acf.coeff, signif)[['signif']] %>% unlist) 
 
-peak.autocorr.lags %>%
-  filter(peak.signif <= 0.05) %>%
-  filter(exp != 'Atr') %>%
-  ggplot() +
-  geom_point(aes(x=peak.time, y=peak.val, size=1-peak.signif, colour=exp)) +
-  gtheme +
-  xlab('Peak lag (s)') +
-  ylab('Peak autocorrelation')
-  
-
 g.acorr.change = peak.autocorr.lags %>%
-  #filter(peak.signif <= 0.05) %>%
-  ggplot(aes(x=exp, y=peak.time)) +
+  filter(peak.signif <= 0.05) %>%
+  ggplot(aes(x=exp)) +
   #geom_line(aes(group=animal), size=0.1) +
   #geom_point(aes(size=1-peak.signif), shape=21, stroke=px2pt) + 
-  geom_point(aes(alpha=if_else(peak.signif <= 0.05, 1.0, 0.5))) + 
+  geom_dotplot(aes(y=peak.time, fill=peak.signif >= 0.05), dotsize=2,
+              binaxis = "y", stackdir = "center", position = "identity", binwidth=1) +
+  #scale_fill_discrete(c('black', 'grey60')) +
+  scale_fill_grey(start=0.0, end=0.8) +
   gtheme +
   xlab('') +
+  ylim(c(0,45)) +
   labs(size='Value') +
   ylab('Peak lag (s)') +
   theme(legend.position = 'none')
 g.acorr.change
   
 
-group_by(peak.autocorr.lags, exp) %>%
-  dplyr::summarise(n=n() - sum(is.na(peak.time)),
-                   mean.peak.val = mean(peak.val, na.rm=TRUE),
-                   sem.peak.val = sem(peak.val))
-wilcox.test(peak.val ~ exp, filter(peak.autocorr.lags, exp!='Atr'))
-  
 peak.autocorr.lags %>%
   filter(peak.signif <= 0.05) %>%
   group_by(exp) %>%
-  ggplot(aes(x=exp, y=peak.time)) +
   dplyr::summarise(n=n() - sum(is.na(peak.time)),
-                   mean.peak.time = median(peak.time, na.rm = TRUE),
-                   sem.peak.time= sem(peak.time))
+                   mean.peak.val = mean(peak.val, na.rm=TRUE),
+                   sd.peak.val = sd(peak.val),
+                   mean.peak.time = mean(peak.time),
+                   sd.peak.time = sd(peak.time))
+#wilcox.test(peak.val ~ exp, filter(peak.autocorr.lags, exp!='Atr'))
+  
+#peak.autocorr.lags %>%
+#  group_by(exp) %>%
+#  ggplot(aes(x=exp, y=peak.time)) +
+#  dplyr::summarise(n=n() - sum(is.na(peak.time)),
+#                   mean.peak.time = median(peak.time, na.rm = TRUE),
+#                   sem.peak.time= sem(peak.time))
 
 wilcox.test(peak.time ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE)
 wilcox.test(peak.val ~ exp, filter(peak.autocorr.lags, exp!='Atr'), paired=TRUE)

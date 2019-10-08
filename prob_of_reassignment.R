@@ -8,7 +8,7 @@ library(dplyr)
 #                exp = c(rep('Ctrl', ncells), rep('ACh', ncells), rep('Atr', ncells)))
 
 calc.ok.changes = function(df) {
-  df = select(df, exp, cell_id, my.clust)
+  #df = select(df, exp, cell_id, my.clust)
   df.ctrl = subset(df, exp == 'Ctrl')
   df.ach = subset(df, exp == 'ACh')
   df.atr = subset(df, exp == 'Atr')
@@ -27,7 +27,11 @@ calc.ok.changes = function(df) {
            correct.change = changed.ctrl2ach & !changed.ctrl2atr,
            correct.nochange = !changed.ctrl2atr & !changed.ctrl2ach,
            incorrect.change = !correct.change & !correct.nochange)
-  
+  return(df.change)
+}
+
+calc.change.probs = function(df) {
+  df.change = calc.ok.changes(df)
   df.prob.change = df.change %>%
     dplyr::summarise(ncells=n(), 
               prob.ctrl2atr=sum(changed.ctrl2ach) / ncells,
@@ -45,6 +49,8 @@ simulate.changes = function(id, df, df.probs) {
   df = select(df, exp, cell_id, my.clust)
   df.ctrl = subset(df, exp == 'Ctrl')
   ncells = nrow(df.ctrl)
+  df.ctrl$exp = rep('Ctrl', ncells)
+  
   ach.clus.changed = rbinom(ncells, 1, df.probs$prob.ctrl2ach)
   atr.clus.changed = rbinom(ncells, 1, df.probs$prob.ach2atr)
   
@@ -56,14 +62,14 @@ simulate.changes = function(id, df, df.probs) {
   df.atr$exp = rep('Atr', ncells)
   df.atr$my.clust = (df.ach$my.clust + atr.clus.changed) %% 2
   
-  calc.ok.changes(bind_rows(df.ctrl, df.ach, df.atr))
+  calc.change.probs(bind_rows(df.ctrl, df.ach, df.atr))
 }
 
 calc.reassigment.percentile = function(animal.df) {
-  df.prob.change = calc.ok.changes(animal.df)
-  df.simulated.correct = lapply(1:100, FUN=simulate.changes, df.probs=df.prob.change, df=animal.df) %>% bind_rows
+  df.change.probs = calc.change.probs(animal.df)
+  df.simulated.correct = lapply(1:1000, FUN=simulate.changes, df.probs=df.change.probs, df=animal.df) %>% bind_rows
   
   df.simulated.correct %>%
-    dplyr::mutate(is.better = nchanges.incorrect <= df.prob.change$nchanges.incorrect) %>%
+    dplyr::mutate(is.better = nchanges.incorrect <= df.change.probs$nchanges.incorrect) %>%
     dplyr::summarise(percentile = sum(is.better) / n())
 }

@@ -104,12 +104,13 @@ signif.shuffled.cors = function(shuffled.df, cors.df) {
 get.cors.df = function(data, cond) {
   d = filter(data, exp==cond)
   x = get.cor(d) 
-  create.cor.values.df(x, 1)
+  df = create.cor.values.df(x, 1)
+  df$exp = rep(cond, nrow(df))
+  return (df)
 }
 
-plot.shuffled.cors = function(shuffled.df, cors.df, includePval=TRUE) {
+plot.shuffled.cors = function(shuffled.df, cors.df, includePval=FALSE) {
   library(grid)
-  pvals = signif.shuffled.cors(shuffled.df, cors.df)
   
   g = ggplot() + 
     stat_ecdf(data=shuffled.df, aes(x=vals, group=shuffle_i), geom='step', alpha=0.6) +
@@ -119,6 +120,7 @@ plot.shuffled.cors = function(shuffled.df, cors.df, includePval=TRUE) {
     xlab('Correlation') + ylab('Probability')
   
   if (includePval) {
+    pvals = signif.shuffled.cors(shuffled.df, cors.df)
     pvaltext = sprintf('max p-val=%.2f',max(pvals))
     g = g + ggtitle(pvaltext)
   }

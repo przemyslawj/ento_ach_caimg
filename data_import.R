@@ -1,3 +1,5 @@
+library(dplyr)
+library(stringr)
 library(tidyr)
 
 import.trace = function(traces_file) {

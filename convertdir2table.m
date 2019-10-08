@@ -1,5 +1,5 @@
-caimg_rootdir = '/mnt/DATA/Audrey/ca_img_result/data_to_process/';
-proc_dat_files = dir([caimg_rootdir '**/*/0_1*/*proc.mat']);
+caimg_rootdir = '/mnt/DATA/Audrey/ca_img_result/data/';
+proc_dat_files = dir([caimg_rootdir '**/*/0*/*proc.mat']);
 
 for i = 1:numel(proc_dat_files)
     dat_file = proc_dat_files(i);

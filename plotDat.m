@@ -23,5 +23,7 @@ r=150;
 set(gcf, 'PaperUnits', 'inches', 'PaperPosition', [0 0 5000 3000]/r);
 print(gcf,'-dpng',sprintf('-r%d',r), 'bar.png');
 
-labeledCells = [7, 13, 25, 34, 40, 48, 54, 59, 68, 72, 85, 62];
+%labeledCells = [7, 13, 25, 34, 40, 48, 54, 59, 68, 72, 85, 62];
+%labeledCells = [24, 29, 31, 47, 55, 65, 146, 84, 63, 89];
+labeledCells = [146, 84, 63];
 drawCells(dat, cell_indecies, labeledCells)

@@ -82,9 +82,8 @@ get.corr.vals = function(M) {
   (filter(df, Var1 != Var2))$value 
 }
 
-get.shuffled.cors = function(data, cond) {
+get.shuffled.cors = function(data, cond, nshuffles=100) {
   d = filter(data, exp==cond)
-  nshuffles = 100
   shuffled.df = create.shuffles(d, nshuffles = nshuffles)
   shuffled.df$exp = rep(cond, nrow(shuffled.df))
   return(shuffled.df)

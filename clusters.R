@@ -68,19 +68,13 @@ plot.cluster.traces = function(data) {
 }
 
 plot.activity.raster = function(data, bin.width) {
-  cluster.data = data %>%
-    group_by(exp, cluster) %>%
-    dplyr::summarise(order.max = max(cluster_order))
- 
   data %>%
     mutate(maxed.ztrace=pmax(-2,pmin(6,ztrace))) %>%
     ggplot(aes(x=frame / frame.rate, y=cluster_order)) +
     geom_tile(aes(fill=maxed.ztrace), interpolate = FALSE, width=bin.width)  +
-    #geom_hline(data=cluster.data, mapping=aes(yintercept=order.max+0.5), color='red')+
     facet_grid(. ~ exp) +
     gtheme +
     labs(fill='z-scored dF/F') +
-    #scale_y_reverse() +
     scale_fill_viridis(breaks=c(0, 5)) +
     ylab('Cell') +
     xlab('Time (sec)')

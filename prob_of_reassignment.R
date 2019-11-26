@@ -21,9 +21,13 @@ calc.ok.changes = function(df) {
                         suffix=c('', '.atr'))
   
   df.change = df.joined2 %>%
-    mutate(changed.ctrl2ach = my.clust.ctrl != my.clust.ach,
+    mutate(changed.ctrl2atr = my.clust.ctrl != my.clust,
            changed.ach2atr = my.clust.ach != my.clust,
-           changed.ctrl2atr = my.clust.ctrl != my.clust,
+           changed.ctrl2ach = my.clust.ctrl != my.clust.ach,
+           changed.ctrl1_2_ach2 = (my.clust.ctrl == 1) & (my.clust.ach == 2),
+           changed.ctrl2_2_ach1 = (my.clust.ctrl == 2) & (my.clust.ach == 1),
+           changed.ach1_2_atr2 = (my.clust.ach == 1) & (my.clust == 2),
+           changed.ach2_2_atr1 = (my.clust.ach == 2) & (my.clust == 1),
            correct.change = changed.ctrl2ach & !changed.ctrl2atr,
            correct.nochange = !changed.ctrl2atr & !changed.ctrl2ach,
            incorrect.change = !correct.change & !correct.nochange)
@@ -34,9 +38,14 @@ calc.change.probs = function(df) {
   df.change = calc.ok.changes(df)
   df.prob.change = df.change %>%
     dplyr::summarise(ncells=n(), 
-              prob.ctrl2atr=sum(changed.ctrl2ach) / ncells,
+              nclus.ctrl1 = sum(my.clust.ctrl == 1),
+              nclus.ach1 = sum(my.clust.ach == 1),
               prob.ctrl2ach=sum(changed.ctrl2ach) / ncells,
               prob.ach2atr=sum(changed.ach2atr) / ncells,
+              prob.ctrl1_2_ach2 = sum(changed.ctrl1_2_ach2) / nclus.ctrl1,
+              prob.ctrl2_2_ach1 = sum(changed.ctrl2_2_ach1) / (ncells - nclus.ctrl1),
+              prob.ach1_2_atr2 = sum(changed.ach1_2_atr2) / nclus.ach1,
+              prob.ach2_2_atr1 = sum(changed.ach2_2_atr1) / (ncells - nclus.ach1),
               nchanges.correct = sum(correct.change),
               nchanges.nochange = sum(correct.nochange),
               nchanges.incorrect = sum(incorrect.change))
@@ -55,12 +64,30 @@ simulate.changes = function(id, df, df.probs) {
   atr.clus.changed = rbinom(ncells, 1, df.probs$prob.ach2atr)
   
   df.ach = df.ctrl
-  df.ach$exp = rep('ACh', ncells)
-  df.ach$my.clust = (df.ctrl$my.clust + ach.clus.changed) %% 2
+  #df.ach$changed2_1 = rbinom(ncells, 1, df.probs$prob.ctrl2_2_ach1)
+  #df.ach$changed1_2 = rbinom(ncells, 1, df.probs$prob.ctrl1_2_ach2)
+  #df.ach = df.ach %>% 
+  #  mutate(new.clust = ifelse(my.clust == 1, ifelse(changed1_2, 2, 1),
+  #                                           ifelse(changed2_1, 1, 2)),
+  #         exp = 'ACh') %>%
+  #  select(-my.clust) %>%
+  #  dplyr::rename(my.clust=new.clust)
   
-  df.atr = df.ctrl
+  df.ach$exp = rep('ACh', ncells)
+  df.ach$my.clust = pmax(1, (df.ctrl$my.clust + ach.clus.changed) %% 3)
+  
+  df.atr = df.ach
+  #df.atr$changed2_1 = rbinom(ncells, 1, df.probs$prob.ach2_2_atr1)
+  #df.atr$changed1_2 = rbinom(ncells, 1, df.probs$prob.ach1_2_atr2)
+  #df.atr = df.atr %>% 
+  #  mutate(new.clust = ifelse(my.clust == 1,
+  #                            ifelse(changed1_2, 2, 1),
+  #                            ifelse(changed2_1, 1, 2)),
+  #         exp = 'Atr') %>%
+  #  select(-my.clust) %>%
+  #  dplyr::rename(my.clust=new.clust)
   df.atr$exp = rep('Atr', ncells)
-  df.atr$my.clust = (df.ach$my.clust + atr.clus.changed) %% 2
+  df.atr$my.clust = pmax(1, (df.ach$my.clust + atr.clus.changed) %% 3)
   
   calc.change.probs(bind_rows(df.ctrl, df.ach, df.atr))
 }

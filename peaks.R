@@ -1,6 +1,6 @@
 get.maxima = function(trace) {
   local.max = c(0, diff(sign(diff(trace)))==-2, 0)
-  threshold=0.1
+  threshold=quantile(trace, 0.5)[1]
   crossesThreshold = FALSE
   prevLocalMax = NA
   
@@ -32,7 +32,7 @@ get.maxima = function(trace) {
   peak.starts = rep(0, length(res))
   peak.ends = rep(0, length(res))
   for (peak in which(res)) {
-    peak.thresh  = trace[peak] * 0.3
+    peak.thresh  = trace[peak] * 0.5
     left_i = peak - 1
     while (left_i > 1 & trace[left_i] >= peak.thresh ) {
       left_i = left_i - 1

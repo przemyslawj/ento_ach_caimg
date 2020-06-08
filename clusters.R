@@ -5,22 +5,6 @@ library(viridis)
 library(tidyr)
 library(tibble)
 
-add.cluster.tsne = function(data) {
-  cor.data = get.cor(data, cond='ACh')
-  tsne.vals = tsne::tsne(cor.data, k=1)
-  cell_ids = unique(data$cell_id)
-  tsne.df = data.frame(cell_id=cell_ids, tsne.val=tsne.vals) %>%
-    arrange(tsne.val) %>%
-    mutate(cluster_order = row_number())
-  
-  data = data %>% 
-    left_join(tsne.df, by='cell_id') %>%
-    mutate(clust.order_value = tsne.val,
-           cluster=1) %>%
-    arrange(cluster_order) 
-  
-  return(data)
-}
 
 add.cluster2 = function(data, clust.res) {
   max.cluster.index = which.max(clust.res$silinfo$clus.avg.widths)

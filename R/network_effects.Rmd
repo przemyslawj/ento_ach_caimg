@@ -248,8 +248,7 @@ t.test(subset(animal.freqs, exp=='Ctrl')$med.event.freq,
        subset(animal.freqs, exp=='ACh')$med.event.freq, paired = TRUE)
 ```
 
-
-Event freq changes of cells on the level of network
+Distribution of event freq changes for each network
 ```{r}
 event.freq.diff = filter(event.freq.df, exp=='ACh') %>%
   full_join(filter(event.freq.df, exp=='Ctrl'), by=c('animal', 'cell_id')) 

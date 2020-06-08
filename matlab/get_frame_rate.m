@@ -1,4 +1,5 @@
 function freq = get_frame_rate(mouse_name)
+% Returns frame rate for the calcium imaging recording for a particular mouse.
 frame_rate = containers.Map;
 frame_rate('Necab_M3') = 2.3;
 frame_rate('Necab_M4') = 2.3;
@@ -15,5 +16,5 @@ frame_rate('Sim_S2_1') = 2.7557;
 frame_rate('Sim_S2_2') = 2.743;
 frame_rate('001') = 10.8;
 
-freq =frame_rate(mouse_name);
+freq = frame_rate(mouse_name);
 end

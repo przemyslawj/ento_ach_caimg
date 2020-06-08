@@ -1,3 +1,6 @@
+% Script extracting xy coordinates of the cells found by Suite2P. The output
+% is saved in a coord.csv.
+
 caimg_rootdir = '/mnt/DATA/Audrey/ca_img_result/data_to_process/';
 proc_dat_files = dir([caimg_rootdir '**/*/0_1*/*proc.mat']);
 
@@ -6,8 +9,8 @@ for i = 1:numel(proc_dat_files)
     dat_file = proc_dat_files(i);
     load(fullfile(dat_file.folder, dat_file.name));
     disp(['Processing mouse: ', dat.ops.mouse_name]);
-    
-    cells = dat.stat;    
+
+    cells = dat.stat;
     cell_indecies = find([dat.stat.iscell] > 0);
     coords = vertcat(cells(cell_indecies).med);
     coords_table = array2table([cell_indecies' int32(coords)]);

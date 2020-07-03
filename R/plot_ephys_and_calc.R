@@ -76,7 +76,7 @@ ggsave(paste0(gen_imgs_dir, '3-dual-recording-caimg.pdf'),
 
 
 
-dat_file = '/mnt/DATA/Audrey/ca_img_sim/20200618/20200618cell4/20200618cell4Firing1_ephyscell.csv'
+dat_file = '/mnt/DATA/Audrey/ca_img_sim/20200618/20200618cell4/single-cell-caimg-20200618cell4Firing1.csv'
 cell_caimg.df=read.csv(dat_file)
 cell_caimg.df = mutate(cell_caimg.df,
                        timestamp=X* 0.32768,

@@ -1,0 +1,173 @@
+---
+title: "Autocorrelation between ephys and caimg data"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+source('data_import.R')
+
+rootdata_dir = '/mnt/DATA/Audrey/ca_img_sim/20200618/'
+frame.rate.hz = 1000 / 327.68
+sampling.hz = list(Ctrl=8080.80,
+                   ACh=8080.80,
+                   Firing=8000)
+```
+
+
+```{r read_caimg}
+all.data = data.frame()
+events.data = data.frame()
+event_files = list.files(rootdata_dir, pattern='events.*.csv', full.names=TRUE)
+
+exp.ephys.suffix = list(Ctrl='Base', ACh='ACh', Firing='Firing')
+vm.df = data.frame()
+
+dat_files = list.files(rootdata_dir, pattern='dat.*.csv', full.names=TRUE)
+for (i in 1:length(dat_files)) {
+  traces_file = dat_files[i]
+  print(paste('reading file:', traces_file))
+  data = import.trace(traces_file, exp.levels = c('Ctrl', 'ACh', 'Firing'))
+  all.data = rbind(all.data, data)
+  
+  # DO for each exp
+  for (exp_name in levels(data$exp)) {
+    ephys.filename.pattern = paste0(data$animal[1], exp.ephys.suffix[[exp_name]], '.*.csv')
+    ephys.exp.files = list.files(file.path(rootdata_dir, data$animal[1]), 
+                                 pattern=ephys.filename.pattern, 
+                                 full.names=TRUE)
+    if (length(ephys.exp.files) == 0) {
+      warning('Did not find a file using file pattern=%s', ephys.filename.pattern)
+    } else {
+      ephys.df = read_csv(ephys.exp.files[1]) 
+      colnames(ephys.df)[1] = 'Vm'
+      # Remove other than the first columns
+      ephys.df = ephys.df[,1]
+      ephys.df$frame = 1:nrow(ephys.df)
+      vm.df.exp = ephys.df %>%
+        dplyr::mutate(exp=exp_name,
+                      animal=data$animal[1],
+                      cell_id=0)
+      vm.df = bind_rows(vm.df, vm.df.exp)
+    }
+  }
+   
+  print(paste('reading file:', event_files[i]))
+  event.df = read_csv(event_files[i])
+  events.data = rbind(events.data, event.df)
+}
+all.data$frame.rate = frame.rate.hz
+events.data$frame.rate = frame.rate.hz
+```
+
+Find active cells
+```{r }
+cell.event.summary = all.data %>%
+  group_by(animal, cell_id, exp) %>%
+  dplyr::summarise(dur.sec = max(frame) / frame.rate[1],
+                   m.event = sum(event / dur.sec)) 
+
+
+min.cell.fr = 0.003
+
+cell.event.summary = cell.event.summary %>%
+  dplyr::group_by(animal, cell_id) %>%
+  dplyr::summarise(isactive=max(m.event) > min.cell.fr) %>%
+  right_join(cell.event.summary, by=c('animal', 'cell_id'))
+
+cells.active.df = filter(cell.event.summary, m.event > min.cell.fr) %>%
+  select(-dur.sec) %>%
+  mutate(animal_cell = paste(animal, cell_id, sep='_'))
+
+cell.event.summary %>%
+  group_by(animal, exp) %>%
+  dplyr::summarise(ncells=n(),nactive=sum(m.event>min.cell.fr))
+```
+
+Calculate correlation of caimg with ephys data
+```{r}
+animal.exp.df = group_by(all.data, animal, exp) %>% dplyr::summarise()
+ccor.df = data.frame()
+
+for (i in 1:nrow(animal.exp.df)) {
+  exp.caimg.data = all.data %>%
+    filter(animal==animal.exp.df$animal[i], exp==animal.exp.df$exp[i]) %>%
+    left_join(cell.event.summary, by=c('animal', 'exp', 'cell_id')) %>% 
+    filter(m.event > min.cell.fr) 
+    #dplyr::mutate(animal_cell =paste(animal, cell_id, sep='_')) %>%
+    #filter(animal_cell %in% cells.active.df$animal_cell)
+  
+  if (nrow(exp.caimg.data) == 0) {
+    next
+  }
+  
+  exp.vm.df = filter(vm.df, animal==animal.exp.df$animal[i], exp==animal.exp.df$exp[i])
+  
+  # Trace values in  cell_id x frame matrix
+  C = reshape2::acast(exp.caimg.data, cell_id ~ frame, value.var='trace')
+  
+  ehys.frame.rate = sampling.hz[[animal.exp.df$exp[i]]]
+  ehpys.frames.bin.size = round(ehys.frame.rate / frame.rate.hz)
+  vm.df.samples = dplyr::mutate(exp.vm.df, bin=ceiling(frame / ehpys.frames.bin.size)) %>%
+    group_by(animal, exp, cell_id, bin) %>%
+    dplyr::summarise(trace=mean(Vm))
+  
+  sim.rec.len = min(ncol(C), nrow(vm.df.samples))
+  C = C[, 1:sim.rec.len, drop=FALSE]
+  Vm = vm.df.samples$trace[1:sim.rec.len]
+  
+  for (cell_id in 1:nrow(C)) {
+    lag.cor = ccf(Vm, C[cell_id,], type='correlation', 
+                  plot=FALSE,
+                  lag.max=frame.rate.hz * 8)
+    max.lag.index = which.max(lag.cor$acf)
+    ccor.df = bind_rows(ccor.df, 
+                        list(animal=animal.exp.df$animal[i],
+                             exp=animal.exp.df$exp[i],
+                             cell_id=cell_id,
+                             lag.sec=lag.cor$lag[max.lag.index] / frame.rate.hz,
+                             ccor=lag.cor$acf[max.lag.index]))
+  }
+}
+```
+
+```{r}
+stat.summary = function(x) {
+  list(med.x=median(x), mean.x=mean(x), sem.x=sem(x))
+}
+
+lag.summaries = bind_rows(
+  append(list(exp='ACh'), stat.summary(subset(ccor.df, exp=='ACh')$lag.sec)), 
+  append(list(exp='Ctrl'), stat.summary(subset(ccor.df, exp=='Ctrl')$lag.sec)))
+
+lag.summaries$exp = factor(lag.summaries$exp, levels=levels(ccor.df$exp))
+
+ccor.df %>%
+  filter(exp != 'Firing') %>%
+  ggplot(aes(x=lag.sec, y=ccor)) +
+  #geom_point(aes(color=animal)) +
+  geom_point(shape=1) +
+  facet_grid(. ~ exp) +
+  geom_vline(data=lag.summaries, mapping=aes(xintercept = med.x), linetype='dashed') +
+  gtheme +
+  ggtitle('Cross-correlation between cells dF/F and voltage') +
+  xlab('Correlation peak lag (s)') +
+  ylab('Correlation')
+
+ggsave('~/tmp/ach_caimg/cross-corr.svg', units='cm', height=5, width=7.2)
+```
+Summary of cross-correlation values and peak lags
+```{r}
+ccor.df %>%
+  group_by(exp) %>%
+  dplyr::summarise(mean(ccor), median(ccor), sem(ccor), median(lag.sec), mean(lag.sec), sem(lag.sec), n())
+
+# Lags not different than zero
+shapiro.test(subset(ccor.df, exp=='ACh')$lag.sec)
+wilcox.test(subset(ccor.df, exp=='ACh')$lag.sec, mu=0, conf.int = TRUE)
+wilcox.test(subset(ccor.df, exp=='Ctrl')$lag.sec, mu=0, confi.int = TRUE)
+```
+

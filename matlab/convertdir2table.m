@@ -1,5 +1,6 @@
 caimg_rootdir = '/mnt/DATA/Audrey/ca_img_result/data/';
 proc_dat_files = dir([caimg_rootdir '**/*/0*/*proc.mat']);
+exp_names = {'Baseline', 'Ach', 'Atropine'};
 
 for i = 1:numel(proc_dat_files)
     dat_file = proc_dat_files(i);
@@ -14,7 +15,8 @@ for i = 1:numel(proc_dat_files)
     close(h);
     
     %%  Create csv file
-    [T, E] = dat2table(dat);
+    dat.iscell = dat.stat.iscell;
+    [T, E] = dat2table(dat, exp_names);
     df_data_path = [caimg_rootdir filesep 'dat_' dat.ops.mouse_name '.csv'];
     writetable(T, df_data_path);
     event_data_path = [caimg_rootdir filesep 'events_' dat.ops.mouse_name '.csv'];

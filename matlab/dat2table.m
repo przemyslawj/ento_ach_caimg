@@ -1,4 +1,4 @@
-function [result_table, result_events] = dat2table(dat)
+function [result_table, result_events] = dat2table(dat, exp_names)
 % Returns table with extracted calcium imaging dF/F traces and a table with
 % calcium events. Suite2P .dat file is used for the input with the traces.
 %
@@ -7,10 +7,9 @@ function [result_table, result_events] = dat2table(dat)
 % values (LOESS smoothing).
 
 manuallyAdjust = false;
-cell_indecies = find([dat.stat.iscell] > 0);
+cell_indecies = find([dat.iscell] > 0);
 result_table = table();
 result_events = table();
-exp_names = {'Baseline', 'Ach', 'Atropine'};
 for exp = 1:size(dat.Fcell, 2)
     F = dat.Fcell{1,exp};
 
@@ -54,7 +53,7 @@ for exp = 1:size(dat.Fcell, 2)
 
     frames = size(F, 2);
     exp_table.frame = (1:frames)';
-    exp_table.date = repmat({dat.ops.date}, frames, 1);
+    %exp_table.date = repmat({dat.ops.date}, frames, 1);
     exp_table.animal = repmat({dat.ops.mouse_name}, frames, 1);
     exp_table.exp = repmat(exp_names(exp), frames, 1);
 
@@ -65,7 +64,7 @@ for exp = 1:size(dat.Fcell, 2)
     end
 
     nevents = size(event_table, 1);
-    event_table.date = repmat({dat.ops.date}, nevents,1);
+    %event_table.date = repmat({dat.ops.date}, nevents,1);
     event_table.animal = repmat({dat.ops.mouse_name}, nevents, 1);
     event_table.exp = repmat(exp_names(exp), nevents, 1);
 

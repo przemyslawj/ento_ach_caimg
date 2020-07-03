@@ -9,7 +9,8 @@ if nargin < 3
     labeledCells = [];
 end
 
-M = rescale(dat.ops.mimg1(dat.ops.yrange, dat.ops.xrange), 0, 1);
+%M = rescale(dat.ops.mimg1(dat.ops.yrange, dat.ops.xrange), 0, 1);
+M = rescale(dat.ops.mimg1, 0, 1);
 
 L_labelled = zeros(size(M));
 L = zeros(size(M));
@@ -19,10 +20,11 @@ BW = zeros(size(M));
 % draw each ROI
 for i=1:numel(cell_indecies)
     cell_index = cell_indecies(i);
-    x = cells(cell_index).xpix;
-    y = cells(cell_index).ypix;
+    x = max(1,cells(cell_index).xpix);
+    y = max(1,cells(cell_index).ypix);
     
-    lambdas = cells(cell_index).lambda;
+    lambdas = cells(cell_index).lam;
+    %lambdas = cells(cell_index).lambda;
     for j = 1:numel(x)
         L(y(j),x(j)) = min(0.01 + 5 * lambdas(j), 2);
     end
@@ -78,10 +80,10 @@ imagesc(Y);
 hold on;
 for i = 1:numel(labeledCells)
   cell_index = labeledCells(i);
-  x = cells(cell_index).xpix;
-  y = cells(cell_index).ypix;
-  text(max(x) + 1, mean(y) - 1 , ...
-     num2str(i),...
+  x = max(1,cells(cell_index).xpix);
+  y = max(1,cells(cell_index).ypix);
+  text(double(max(x) + 1), mean(y) - 1 , ...
+     num2str(cell_index),...
      'Color', 'w');
 end
 hold off;

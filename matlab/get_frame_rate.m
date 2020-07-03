@@ -16,5 +16,9 @@ frame_rate('Sim_S2_1') = 2.7557;
 frame_rate('Sim_S2_2') = 2.743;
 frame_rate('001') = 10.8;
 
-freq = frame_rate(mouse_name);
+if frame_rate.isKey(mouse_name)
+    freq = frame_rate(mouse_name);
+else
+    freq = 3.05;
+end
 end

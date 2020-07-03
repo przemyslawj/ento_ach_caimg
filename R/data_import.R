@@ -2,8 +2,8 @@ library(dplyr)
 library(stringr)
 library(tidyr)
 
-import.trace = function(traces_file) {
-  meta.cols = c("frame","date","animal","exp", "cell_id")
+import.trace = function(traces_file, exp.levels = c('Ctrl', 'ACh', 'Atr')) {
+  meta.cols = c("frame","animal","exp", "cell_id")
   data = read.csv(traces_file)
   
   trace.data = data %>%
@@ -33,7 +33,7 @@ import.trace = function(traces_file) {
   data$exp = str_replace(data$exp, 'Baseline', 'Ctrl')
   data$exp = str_replace(data$exp, 'Ach', 'ACh')
   data$exp = str_replace(data$exp, 'Atropine', 'Atr')
-  data$exp = factor(data$exp, levels=c('Ctrl', 'ACh', 'Atr'))
+  data$exp = factor(data$exp, levels=exp.levels)
   
   return(data)
 }

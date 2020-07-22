@@ -109,7 +109,7 @@ events.data$exp = revalue(events.data$exp, c('Ach'='ACh', 'Atropine'='Atr', 'Bas
 Find cells which were active during the recordings
 ```{r}
 cell.event.summary = all.data %>%
-  group_by(animal, date, cell_id, exp) %>%
+  group_by(animal, cell_id, exp) %>%
   dplyr::summarise(dur.sec = max(frame) / frame.rate[1],
             m.event = sum(event / dur.sec)) 
 
@@ -148,7 +148,7 @@ g.slices
 Count of active neurons depending on experimental condition
 ```{r}
 all.data %>%
-  group_by(animal, date, cell_id, exp) %>%
+  group_by(animal, cell_id, exp) %>%
   dplyr::summarise(dur.sec = max(frame) / frame.rate[1],
                    nevents = sum(event),
             m.event = sum(event / dur.sec)) %>%
@@ -168,7 +168,7 @@ zscore = function(x) {
 }
 
 all.data = ddply(all.data, 
-                 .(date, animal, exp, cell_id), 
+                 .(animal, exp, cell_id), 
                  mutate, 
                  ztrace = zscore(strace))
 ```
@@ -206,8 +206,8 @@ filtered.events.data = events.data %>%
 # Event analysis
 ```{r}
 filtered.events.data = mutate(filtered.events.data, dur = End_sec - Start_sec) %>%
-  mutate(exp_cell = paste0(animal, exp, cell_id, sep='_')) %>%
-  mutate(animal_exp = paste0(animal, exp, sep='_')) 
+  mutate(exp_cell = paste(animal, exp, cell_id, sep='_')) %>%
+  mutate(animal_exp = paste(animal, exp, sep='_')) 
 
 event.freq.df = group_by(filtered.events.data, animal, cell_id, exp, exp_cell, animal_exp) %>%
   dplyr::summarise(event_freq = n() / 420 * 60)
@@ -236,16 +236,11 @@ summary.event.freq.df %>%
   dplyr::summarise(freq.med=mean(med.freq), freq.sem=sem(med.freq), n=n())
 ```
 
-Change in event freq (ACh - Ctrl)
+Change in event freq (ACh - Ctrl) - all slices
 ```{r}
 animal.freqs = event.freq.df %>%
   group_by(animal, exp) %>%
   dplyr::summarise(med.event.freq = median(event_freq))
-
-shapiro.test(subset(animal.freqs, exp=='Ctrl')$med.event.freq)
-shapiro.test(subset(animal.freqs, exp=='ACh')$med.event.freq)
-t.test(subset(animal.freqs, exp=='Ctrl')$med.event.freq,
-       subset(animal.freqs, exp=='ACh')$med.event.freq, paired = TRUE)
 ```
 
 Distribution of event freq changes for each network
@@ -407,14 +402,14 @@ g.activity.raster
 
 Assign each cell to one of two clusters
 ```{r}
-g.dist.all = plot_grid(
-  get.cor.data(data, 'Ctrl', res.kmeans.all) %>% plot.cor.dist('Ctrl', res.kmeans.all),
-  get.cor.data(data, 'ACh', res.kmeans.all) %>% plot.cor.dist('ACh', res.kmeans.all),
-  get.cor.data(data, 'Atr', res.kmeans.all) %>% plot.cor.dist('Atr', res.kmeans.all),
-  ncol=3)
-
-g.activity = plot_grid(g.activity.raster, g.dist.all, ncol=1)
+get.cor.data = function(data, cond, res.kmeans.all) {
+  exp.data = filter(data, exp==cond)
+  res.kmeans = res.kmeans.all[[cond]]
   
+  exp.data = add.cluster2(exp.data, res.kmeans)
+  get.cor(exp.data)
+}
+
 add.cluster.to.all = function(data) {
   animal.data = data.frame()
   for (cond in levels(data$exp)) {
@@ -479,18 +474,23 @@ silwidths$animal = rep(animal_file, nrow(silwidths))
 
 ```{r}
 plot.cluster.assignments = function(clust.df, clust.distance=50) {
-  my.clust.df = select(clust.df, cell_id, exp, my.clust) %>%
+  clust.df$animal = as.factor(clust.df$animal)
+  clust.df$cell_id = as.integer(clust.df$cell_id)
+  max.ncells = unique(clust.df$cell_id) %>% max
+  clust.df = dplyr::mutate(clust.df, 
+                           cell_id=(as.numeric(animal) - 1) * (max.ncells + 1) + cell_id) 
+  my.clust.df = dplyr::select(clust.df, cell_id, exp, my.clust) %>%
     spread(exp, my.clust)
   if (! (all(levels(clust.df$exp) %in% colnames(my.clust.df)))) {
     return(ggplot())
   }
   
-  ncells = unique(clust.df$cell_id) %>% length
   my.clust.df = arrange(my.clust.df, Ctrl, ACh, Atr) 
   my.clust.df$ordinal = 1:nrow(my.clust.df)
   
+  ncells = unique(clust.df$cell_id) %>% length
   assignment.groups = my.clust.df %>% 
-    group_by(Ctrl, ACh, Atr) %>%
+    dplyr::group_by(Ctrl, ACh, Atr) %>%
     dplyr::summarise(min.ordinal = min(ordinal),
                      max.ordinal = max(ordinal),
                      pct = round((max.ordinal - min.ordinal + 1)/ ncells * 100)) %>%
@@ -596,7 +596,7 @@ all.data.binned.tmp = filtered.all.data %>%
   mutate(bin = ceil(frame / (bin.dur.sec * frame.rate))) 
 all.data.binned.tmp$bin = as.factor(all.data.binned.tmp$bin)
 all.data.binned = all.data.binned.tmp %>%
-   ddply(.(date, animal, exp, bin, cell_id), summarize, 
+   ddply(.(animal, exp, bin, cell_id), summarize, 
          df.auc = trapz(frame, ztrace) / length(frame),
          sevent.rate = sum(sevent) / bin.dur.sec,
          event.rate = sum(event) / bin.dur.sec,
@@ -617,7 +617,7 @@ all.data.binned = all.data.binned.tmp %>%
 Calculate population signal - mean traces for animal per experiment
 ```{r}
 animal.data.binned = all.data.binned.tmp %>%
-  ddply(.(date, animal, exp, bin), summarize, 
+  ddply(.(animal, exp, bin), summarize, 
         ztrace.mean = mean(ztrace, na.rm = TRUE),
         frame = min(frame)) 
 animal.data.binned$bin = as.integer(animal.data.binned$bin)
@@ -707,7 +707,7 @@ Find cells participating in events
 ```{r}
 all.data.binned$bin = as.integer(all.data.binned$bin)
 pop.events.signal = left_join(filter(timebin.isevent, exceeds.thresh),
-                              all.data.binned, by=c('date', 'animal', 'exp', 'bin'))
+                              all.data.binned, by=c('animal', 'exp', 'bin'))
 
 cell.event.participation.df = pop.events.signal %>%
   dplyr::group_by(animal, exp, cell_id, peak.start) %>%
@@ -723,9 +723,7 @@ Table with metrics on all population events
 ```{r}
 cell.event.participation.df %>%
   dplyr::group_by(animal, exp, peak.start) %>% 
-  dplyr::summarise(ncells=n(), 
-                   #nactive=sum(has.event),
-                   #nactive2=sum(ztrace - ztrace.min > 0.5),
+  dplyr::summarise(ncells=n(),
                    nactive=sum(participates),
                    event.dur=mean(peak.dur),
                    pop.zscore.mean=mean(pop.ztrace.mean) %>% round(2),
@@ -816,8 +814,6 @@ g.cell.participation = cell.participation.summary %>%
   sample.by.animal.exp(nsamples=100) %>%
   ggplot() +
   stat_ecdf(aes(x=pct.participate, linetype=exp)) +
-  #geom_density() +
-  #facet_wrap(. ~ animal, scales = 'free_y', ncol = 4) +
   geom_vline(xintercept = 80, linetype='dashed', color='grey50') +
   scale_x_continuous(breaks=c(0, 20, 40, 60, 80, 100)) +
   scale_y_continuous(breaks=c(0, 0.5, 1.0)) +
@@ -838,7 +834,6 @@ cell.event.participation.df %>%
                    cell.ztrace.sd = sd(ztrace.max)) %>% 
   ggplot() +
   geom_density(aes(x=cell.ztrace.sd/cell.ztrace.mean, color=exp, stat(count))) +
-  #geom_vline(aes(xintercept=pop.thr, color=exp)) +
   facet_grid(. ~ animal, scales = 'free_x') + 
   coord_flip() +
   xlim(c(-1,2)) +
@@ -850,7 +845,6 @@ Stats and figures on event participation
 ```{r}
 pop.active.summary = pop.active.df %>%
   group_by(animal, exp) %>%
-  #filter(animal != 'Necab_M4') %>%
   dplyr::summarise(active.m=mean(nactive) %>% round(),
                    active.pct.m=active.m/ncells[1] * 100 %>% round(0),
                    active.sem=sem(nactive) %>% round(),
@@ -878,11 +872,14 @@ pop.active.summary %>%
 shapiro.test(subset(pop.active.summary, exp=='Ctrl')$events.dur)
 shapiro.test(subset(pop.active.summary, exp=='ACh')$events.dur)
 shapiro.test(subset(pop.active.summary, exp=='Atr')$events.dur)
-t.test(events.dur ~ exp, subset(pop.active.summary, exp != 'Atr'), paired=TRUE)
-t.test(events.dur ~ exp, subset(pop.active.summary, exp != 'Ctrl'), paired=TRUE)
+wilcox.test(events.dur ~ exp, subset(pop.active.summary, exp != 'Atr'), paired=TRUE)
+wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$events.dur, 
+              subset(pop.active.summary,exp == 'Ctrl')$events.dur)
+wilcox.test(events.dur ~ exp, subset(pop.active.summary, exp != 'Ctrl'), paired=TRUE)
+wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$events.dur, 
+              subset(pop.active.summary,exp == 'Atr')$events.dur)
 
 g.pop.event.dur = pop.active.summary %>%
-  #filter(exp != 'Atr') %>%
   ggplot() +
   geom_line(aes(x=exp, y=events.dur, group=animal)) +
   gtheme +
@@ -893,8 +890,12 @@ g.pop.event.dur = pop.active.summary %>%
 shapiro.test(subset(pop.active.summary, exp=='Ctrl')$events.freq)
 shapiro.test(subset(pop.active.summary, exp=='ACh')$events.freq)
 shapiro.test(subset(pop.active.summary, exp=='Atr')$events.freq)
-t.test(events.freq ~ exp, subset(pop.active.summary,exp != 'Atr'), paired=TRUE)
-t.test(events.freq ~ exp, subset(pop.active.summary,exp != 'Ctrl'), paired=TRUE)
+wilcox.test(events.freq ~ exp, subset(pop.active.summary,exp != 'Atr'), paired=TRUE)
+wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$events.freq, 
+              subset(pop.active.summary,exp == 'Ctrl')$events.freq)
+wilcox.test(events.freq ~ exp, subset(pop.active.summary,exp != 'Ctrl'), paired=TRUE)
+wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$events.freq, 
+              subset(pop.active.summary,exp == 'Atr')$events.freq)
 
 g.pop.event.freq = pop.active.summary %>%
   #filter(exp != 'Atr') %>%
@@ -908,9 +909,12 @@ g.pop.event.freq = pop.active.summary %>%
 shapiro.test(subset(pop.active.summary, exp=='Ctrl')$median.strace)
 shapiro.test(subset(pop.active.summary, exp=='ACh')$median.strace)
 shapiro.test(subset(pop.active.summary, exp=='Atr')$median.strace)
-t.test(median.strace ~ exp, subset(pop.active.summary, exp != 'Atr'), paired=TRUE)
+wilcox.test(median.strace ~ exp, subset(pop.active.summary, exp != 'Atr'), paired=TRUE)
+wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$median.strace, 
+              subset(pop.active.summary, exp == 'Ctrl')$median.strace)
 wilcox.test(median.strace ~ exp, subset(pop.active.summary, exp != 'Ctrl'), paired=TRUE)
-wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$median.strace, subset(pop.active.summary, exp == 'Atr')$median.strace)
+wilcox.test.w(subset(pop.active.summary, exp == 'ACh')$median.strace, 
+              subset(pop.active.summary, exp == 'Atr')$median.strace)
 
 g.pop.event.peak = pop.active.summary %>%
   #filter(exp != 'Atr') %>%
@@ -931,6 +935,40 @@ g.pop.event.stats = plot_grid(
                               rel_widths = c(2,1.4,2,1.4,2),
                               labels=c('C', '', 'D', '','E'), label_size=gtheme.label_size)
 ```
+
+## Cell transient events
+Stats only on slices with population events
+Frequency of events
+```{r}
+filtered.animal.freqs = filter(animal.freqs, animal %in% has.pop.event)
+
+filtered.animal.freqs %>%
+  group_by(exp) %>%
+  dplyr::summarise(mean(med.event.freq), sem(med.event.freq), n=n())
+
+wilcox.test(subset(filtered.animal.freqs, exp=='Ctrl')$med.event.freq,
+            subset(filtered.animal.freqs, exp=='ACh')$med.event.freq, paired = TRUE)
+wilcox.test.w(subset(filtered.animal.freqs, exp=='ACh')$med.event.freq,
+              subset(filtered.animal.freqs, exp=='Ctrl')$med.event.freq)
+```
+Duration of events
+```{r}
+filtered.animal.durs = filtered.events.data %>% 
+  group_by(animal, exp, animal_exp) %>%
+  dplyr::summarise(med.event.dur = median(dur), nevents = n())  %>%
+  filter(animal %in% has.pop.event)
+
+filtered.animal.durs %>%
+  group_by(exp) %>%
+  dplyr::summarise(mean(med.event.dur), sem(med.event.dur), n=n())
+
+wilcox.test(subset(filtered.animal.durs, exp=='Ctrl')$med.event.dur,
+            subset(filtered.animal.durs, exp=='ACh')$med.event.dur, paired = TRUE)
+wilcox.test.w(subset(filtered.animal.durs, exp=='ACh')$med.event.dur,
+              subset(filtered.animal.durs, exp=='Ctrl')$med.event.dur)
+```
+
+
 
 # Plots of population event participation 
 ```{r}
@@ -1007,7 +1045,7 @@ reassignment.percentiles
 X = events.participation.df %>%
   filter(animal %in% ctrl.pop.animals)
   #filter(animal == 'Necab_M13')
-X = mutate(X, cell_id = (as.numeric(animal) - 1) * 300 + as.numeric(as.character(cell_id)))
+#X = mutate(X, cell_id = (as.numeric(animal) - 1) * 300 + as.numeric(as.character(cell_id)))
 g.cluster.assignments.all = plot.cluster.assignments(ungroup(X)) 
 g.cluster.assignments.all
 ggsave(paste0(gen_imgs_dir,'pop_events_participation_change_thr', num2str(events.participation.thr, fmt=0) ,'.pdf'),
@@ -1034,36 +1072,6 @@ ggsave(paste0(gen_imgs_dir, '4-cell_participation.pdf'),
 ```
 
 
-Change in event rate
-```{r}
-exp.peak.durs = animal.data.peaks %>%
-  group_by(animal, exp) %>%
-  dplyr::summarise(upstate.dur.sec = sum(peak.dur)) %>%
-  dplyr::mutate(downstate.dur.sec = rec.dur.sec - upstate.dur.sec)
-
-mer.state = left_join(cell.events.df, exp.peak.durs) %>%
-  dplyr::mutate(mer.upstate = nduring.event / upstate.dur.sec,
-                mer.downstate = (nevents - nduring.event) / downstate.dur.sec)
-
-mer.diff.ach = filter(mer.state, exp=='ACh') %>%
-  full_join(filter(mer.state, exp=='Ctrl'), by=c('animal', 'cell_id')) %>%
-  dplyr::mutate(mer.upstate.diff = replace_na(mer.upstate.x, 0) - replace_na(mer.upstate.y, 0),
-                mer.downstate.diff = replace_na(mer.downstate.x, 0) - replace_na(mer.downstate.y, 0))
-```
-
-Plot diff in cell event rates as the result of ACh
-```{r}
-ggplot(mer.diff.ach) +
-  geom_point(aes(x=mer.upstate.diff, y=mer.downstate.diff, color=animal)) +
-  geom_vline(xintercept = 0, linetype='dashed') +
-  geom_hline(yintercept = 0, linetype='dashed') +
-  gtheme +
-  xlab('UP-state event rate change') +
-  ylab('DOWN-state event rate change')
-
-```
-
-
 Mean trace change for the same cell
 ```{r}
 library(pracma)
@@ -1071,7 +1079,7 @@ library(pracma)
 create.cell.summary = function(data, first.sec=500) {
   data %>%
   filter(frame < first.sec * frame.rate) %>%
-  group_by(date, animal, exp, cell_id) %>%
+  group_by(animal, exp, cell_id) %>%
   dplyr::summarise(
             m.trace=mean(ztrace), 
             nevents=sum(sevent),
@@ -1335,8 +1343,6 @@ cor.df$exp = factor(cor.df$exp, levels=levels(filtered.all.data$exp))
 
 cordist.df = left_join(dist.df, cor.df, by=c('animal', 'cell.fst', 'cell.snd')) %>%
   filter(cell.fst != cell.snd)
-
-signif.exps = (filter(cors.pval.df, pval <= 0.05) %>% mutate(exp_name = paste(exp, animal)))$exp_name
 ```
 
 Sample distances
@@ -1344,11 +1350,9 @@ Sample distances
 dist.binwidth = 50
 binsample = 5
 sampled.cordist.df = cordist.df %>%
-  filter(paste(exp, animal) %in% signif.exps) %>%
   mutate(dist_bin = floor(dist/dist.binwidth)) %>%
   group_by(dist_bin, animal) %>%
   sample_n(binsample, replace=TRUE)
-
 ```
 
 
